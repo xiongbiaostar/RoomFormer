@@ -1,5 +1,6 @@
 # Modified from Deformable DETR
 # Yuanwen Yue
+import os
 
 import torch
 import torch.nn.functional as F
@@ -9,6 +10,7 @@ import math
 from util.misc import NestedTensor, nested_tensor_from_tensor_list, interpolate, inverse_sigmoid
 
 from .backbone import build_backbone
+from .dn_components import prepare_for_dn, dn_post_process, compute_dn_loss
 from .matcher import build_matcher
 from .losses import custom_L1_loss, MaskRasterizationLoss
 from .deformable_transformer import build_deforamble_transformer
@@ -22,7 +24,7 @@ def _get_clones(module, N):
 class RoomFormer(nn.Module):
     """ This is the RoomFormer module that performs floorplan reconstruction """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_polys, num_feature_levels,
-                 aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1):
+                 aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1, use_mqs=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -46,7 +48,16 @@ class RoomFormer(nn.Module):
         self.num_feature_levels = num_feature_levels
 
         self.query_embed = nn.Embedding(num_queries, 2)
-        self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
+        self.tgt_embed = nn.Embedding(num_queries, hidden_dim-1)
+
+        # dn label enc
+        self.num_classes = num_classes
+        self.hidden_dim = transformer.d_model
+        self.label_enc = nn.Embedding(num_classes + 1, hidden_dim - 1)  # # for indicator
+
+        #use_mqs
+        self.use_mqs = use_mqs
+
         if num_feature_levels > 1:
             num_backbone_outs = len(backbone.strides)
             input_proj_list = []
@@ -82,7 +93,7 @@ class RoomFormer(nn.Module):
             nn.init.xavier_uniform_(proj[0].weight, gain=1)
             nn.init.constant_(proj[0].bias, 0)
 
-        num_pred = transformer.decoder.num_layers
+        num_pred = (transformer.decoder.num_layers + 1) if use_mqs else transformer.decoder.num_layers
         
         if with_poly_refine:
             self.class_embed = _get_clones(self.class_embed, num_pred)
@@ -113,7 +124,7 @@ class RoomFormer(nn.Module):
         else:
             self.attention_mask = None
 
-    def forward(self, samples: NestedTensor):
+    def forward(self, samples: NestedTensor,dn_args=None):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensors: batched images, of shape [batch_size x C x H x W]
                - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
@@ -156,13 +167,35 @@ class RoomFormer(nn.Module):
 
         query_embeds = self.query_embed.weight
         tgt_embeds = self.tgt_embed.weight
+        # --------------------------------------
+        # preprare for dn
+        if  self.use_mqs:
+            query_embeds = None
+            tgt_embeds = None
+        input_query_label, input_query_polys, attn_mask, mask_dict = \
+            prepare_for_dn(dn_args, tgt_embeds, query_embeds, src.size(0), self.training, self.num_queries,
+                           self.num_classes,
+                           self.hidden_dim, self.label_enc)
+        # print("preprare for dn",input_query_label.shape,input_query_polys.shape,query_embeds.shape,tgt_embeds.shape)
         
-        hs, init_reference, inter_references, inter_classes = self.transformer(srcs, masks, pos, query_embeds, tgt_embeds, self.attention_mask)
+        # --------------------------------------
+
+        hs, init_reference, inter_references, inter_classes , enc_outputs_class, enc_outputs_coord_unact = self.transformer(srcs, masks, pos, input_query_polys, input_query_label, attn_mask)
 
         num_layer = hs.shape[0]
-        outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
-        outputs_coord = inter_references.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 2)
-        
+        # print("输出结果看看", inter_classes.shape, inter_references.shape,num_layer,bs,self.num_polys,self.num_queries_per_poly)
+        #"输出结果看看",torch.Size([6, 2, 1090, 1]) torch.Size([6, 2, 1090, 2]) 6 2 20 40
+        # outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
+        # outputs_coord = inter_references.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 2)
+
+        # --------------------------------------
+        # dn post process
+        outputs_class,outputs_coord = dn_post_process(inter_classes,inter_references,mask_dict)
+        outputs_class = outputs_class.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
+        outputs_coord = outputs_coord.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 2)
+        # --------------------------------------
+
+
         out = {'pred_logits': outputs_class[-1], 'pred_coords': outputs_coord[-1]}
 
         # hack implementation of room label prediction, not compatible with auxiliary loss
@@ -173,7 +206,13 @@ class RoomFormer(nn.Module):
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
 
-        return out
+        if self.use_mqs:
+            enc_outputs_coord = enc_outputs_coord_unact.sigmoid()
+            out['enc_outputs'] = {'pred_logits': enc_outputs_class, 'pred_boxes': enc_outputs_coord}
+            if os.environ.get('IPDB_SHILONG_DEBUG') == 'INFO':
+                import ipdb;
+                ipdb.set_trace()
+        return out,mask_dict
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord):
@@ -221,8 +260,8 @@ class SetCriterion(nn.Module):
         target_classes = torch.full(src_logits.shape, self.num_classes-1,
                                     dtype=torch.float32, device=src_logits.device)
         target_classes[idx] = target_classes_o
-
-
+        # print("loss_labels",target_classes_o.shape,target_classes.shape,target_classes,target_classes_o)#loss_labels torch.Size([13, 40]) torch.Size([2, 20, 40])
+        #src_logits.shape=[2, 20, 40]，src_logits,target_classes
         loss_ce = F.binary_cross_entropy_with_logits(src_logits, target_classes)
 
         losses = {'loss_ce': loss_ce}
@@ -265,7 +304,7 @@ class SetCriterion(nn.Module):
         src_polys = outputs['pred_coords'][idx]
         target_polys = torch.cat([t['coords'][i] for t, (_, i) in zip(targets, indices)], dim=0)
         target_len =  torch.cat([t['lengths'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-
+        # print("loss-polys", target_polys.shape,src_polys.flatten(1,2).shape,src_polys.shape,target_len)#loss-polys torch.Size([13, 80])
         loss_coords = custom_L1_loss(src_polys.flatten(1,2), target_polys, target_len)
 
         losses = {}
@@ -299,7 +338,7 @@ class SetCriterion(nn.Module):
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, **kwargs)
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, mask_dict=None):
         """ This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
@@ -307,6 +346,7 @@ class SetCriterion(nn.Module):
                       The expected keys in each dict depends on the losses applied, see each loss' doc
         """
         outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs' and k != 'enc_outputs'}
+
 
         # Retrieve the matching between the outputs of the last layer and the targets
         indices = self.matcher(outputs_without_aux, targets)
@@ -339,6 +379,13 @@ class SetCriterion(nn.Module):
                 l_dict = {k + f'_enc': v for k, v in l_dict.items()}
                 losses.update(l_dict)
 
+
+        # dn loss computation
+        aux_num = 0
+        if 'aux_outputs' in outputs:
+            aux_num = len(outputs['aux_outputs'])
+        dn_losses = compute_dn_loss(mask_dict, self.training, aux_num)
+        losses.update(dn_losses)
         return losses
 
 
@@ -372,7 +419,8 @@ def build(args, train=True):
         aux_loss=args.aux_loss,
         with_poly_refine=args.with_poly_refine,
         masked_attn=args.masked_attn,
-        semantic_classes=args.semantic_classes
+        semantic_classes=args.semantic_classes,
+        use_mqs=args.use_mqs
     )
 
     if not train:
@@ -386,6 +434,12 @@ def build(args, train=True):
                     'loss_coords': args.coords_loss_coef,
                     'loss_raster': args.raster_loss_coef
                     }
+    # dn loss
+
+    weight_dict['tgt_loss_ce'] = args.cls_loss_coef
+    weight_dict['tgt_loss_coords'] = args.coords_loss_coef
+
+
     weight_dict['loss_dir'] = 1
 
     enc_weight_dict = {}

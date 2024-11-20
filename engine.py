@@ -20,7 +20,7 @@ from s3d_floorplan_eval.DataRW.S3DRW import S3DRW
 from s3d_floorplan_eval.DataRW.wrong_annotatios import wrong_s3d_annotations_list
 
 from scenecad_eval.Evaluator import Evaluator_SceneCAD
-from util.poly_ops import pad_gt_polys
+from util.poly_ops import pad_gt_polys, get_gt_polys
 from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan
 
 options = MCSSOptions()
@@ -28,7 +28,7 @@ opts = options.parse()
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0):
+                    device: torch.device, epoch: int, max_norm: float = 0, args = None):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -41,10 +41,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         samples = [x["image"].to(device) for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
-
-        outputs = model(samples)
-        loss_dict = criterion(outputs, room_targets)
+        targets = get_gt_polys(gt_instances, model.num_queries_per_poly, device)
+        dn_args = (targets, args.scalar, args.label_noise_scale, args.box_noise_scale)
+        if args.contrastive is not False:
+            dn_args += (args.contrastive,)
+        scene_ids = [x["image_id"] for x in batched_inputs]
+        # print("当前", scene_ids)
+        outputs,mask_dict = model(samples,dn_args)
+        loss_dict = criterion(outputs, room_targets,mask_dict)
         weight_dict = criterion.weight_dict
+        #print(loss_dict)
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         loss_dict_unscaled = {f'{k}_unscaled': v
@@ -92,7 +98,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
 
 
-        outputs = model(samples)
+        outputs,_ = model(samples)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
 
@@ -248,7 +254,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     plot_semantic_rich_floorplan(gt_sem_rich, gt_sem_rich_path, prec=1, rec=1) 
 
 
-        outputs = model(samples)
+        outputs,_ = model(samples)
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
         fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners

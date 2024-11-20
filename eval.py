@@ -17,7 +17,7 @@ from models import build_model
 
 def get_args_parser():
     parser = argparse.ArgumentParser('RoomFormer', add_help=False)
-    parser.add_argument('--batch_size', default=10, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
 
     # backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -78,7 +78,7 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--checkpoint', default='checkpoints/roomformer_scenecad.pth', help='resume from checkpoint')
+    parser.add_argument('--checkpoint', default='output/2024-11-16-09-08-59_train_stru3d/checkpoint0419.pth', help='resume from checkpoint')
     parser.add_argument('--output_dir', default='eval_stru3d',
                         help='path where to save result')
 

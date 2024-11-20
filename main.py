@@ -15,6 +15,7 @@ from datasets import build_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
 
+os.environ["WANDB_MODE"] = "offline"
 
 
 def get_args_parser():
@@ -24,15 +25,14 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=2e-5, type=float)
     parser.add_argument('--lr_linear_proj_names', default=['sampling_offsets'], type=str, nargs='+')
     parser.add_argument('--lr_linear_proj_mult', default=0.1, type=float)
-    parser.add_argument('--batch_size', default=10, type=int)
+    parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=500, type=int)
-    parser.add_argument('--lr_drop', default=[400], type=list)
+    parser.add_argument('--lr_drop', default=[1], type=list)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
 
     parser.add_argument('--sgd', action='store_true')
-
 
     # backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -96,24 +96,43 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
-    parser.add_argument('--dataset_root', default='data/stru3d', type=str)
+    parser.add_argument('--dataset_root',
+                        default='/media/liuyiyi/Data/Postgraduate/ProjectWorkSpace/github/RoomFormer/data/stru3d',
+                        type=str)
 
     parser.add_argument('--output_dir', default='output',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='output/2024-11-19-22-07-00_train_stru3d/checkpoint.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--job_name', default='train_stru3d', type=str)
 
+    # DN,query selection,look forward twice
+    # parser.add_argument('--contrastive', action="store_true",
+    #                     help="use contrastive training.")
+    parser.add_argument('--use_mqs', action="store_true", default="true",
+                        help="use mixed query selection from DINO.")
+    parser.add_argument('--use_lft', action="store_true", default="true",
+                        help="use look forward twice from DINO.")
+    parser.add_argument('--use_dn', action="store_true",
+                        help="use denoising training.")
+    parser.add_argument('--scalar', default=5, type=int,
+                        help="number of dn groups")
+    parser.add_argument('--label_noise_scale', default=0.2, type=float,
+                        help="label noise ratio to flip")
+    parser.add_argument('--box_noise_scale', default=0.4, type=float,
+                        help="box noise scale to shift and scale")
+    parser.add_argument('--contrastive', action="store_true",
+                        help="use contrastive training.")
+
     return parser
 
 
 def main(args):
-
     print("git:\n  {}\n".format(utils.get_sha()))
 
     print(args)
@@ -141,7 +160,6 @@ def main(args):
     # build dataset and dataloader
     dataset_train = build_dataset(image_set='train', args=args)
     dataset_val = build_dataset(image_set='val', args=args)
-
 
     sampler_train = torch.utils.data.RandomSampler(dataset_train)
     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
@@ -177,15 +195,18 @@ def main(args):
         {
             "params":
                 [p for n, p in model.named_parameters()
-                 if not match_name_keywords(n, args.lr_backbone_names) and not match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
+                 if not match_name_keywords(n, args.lr_backbone_names) and not match_name_keywords(n,
+                                                                                                   args.lr_linear_proj_names) and p.requires_grad],
             "lr": args.lr,
         },
         {
-            "params": [p for n, p in model.named_parameters() if match_name_keywords(n, args.lr_backbone_names) and p.requires_grad],
+            "params": [p for n, p in model.named_parameters() if
+                       match_name_keywords(n, args.lr_backbone_names) and p.requires_grad],
             "lr": args.lr_backbone,
         },
         {
-            "params": [p for n, p in model.named_parameters() if match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
+            "params": [p for n, p in model.named_parameters() if
+                       match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
             "lr": args.lr * args.lr_linear_proj_mult,
         }
     ]
@@ -197,7 +218,6 @@ def main(args):
                                       weight_decay=args.weight_decay)
 
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.lr_drop)
-
 
     output_dir = Path(args.output_dir)
     if args.resume:
@@ -220,7 +240,8 @@ def main(args):
             # todo: this is a hack for doing experiment that resume from checkpoint and also modify lr scheduler (e.g., decrease lr in advance).
             args.override_resumed_lr_drop = False
             if args.override_resumed_lr_drop:
-                print('Warning: (hack) args.override_resumed_lr_drop is set to True, so args.lr_drop would override lr_drop in resumed lr_scheduler.')
+                print(
+                    'Warning: (hack) args.override_resumed_lr_drop is set to True, so args.lr_drop would override lr_drop in resumed lr_scheduler.')
                 lr_scheduler.step_size = args.lr_drop
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
             lr_scheduler.step(lr_scheduler.last_epoch)
@@ -234,7 +255,7 @@ def main(args):
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         train_stats = train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
+            model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm, args=args)
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
@@ -258,31 +279,31 @@ def main(args):
                      **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
-        
+
         wandb.log({"epoch": epoch})
         wandb.log({"lr_rate": train_stats['lr']})
 
         train_log_dict = {
-                "train/loss": train_stats['loss'],
-                "train/loss_ce": train_stats['loss_ce'],
-                "train/loss_coords": train_stats['loss_coords'],
-                "train/loss_coords_unscaled": train_stats['loss_coords_unscaled'],
-                "train/cardinality_error": train_stats['cardinality_error_unscaled']
-                }
+            "train/loss": train_stats['loss'],
+            "train/loss_ce": train_stats['loss_ce'],
+            "train/loss_coords": train_stats['loss_coords'],
+            "train/loss_coords_unscaled": train_stats['loss_coords_unscaled'],
+            "train/cardinality_error": train_stats['cardinality_error_unscaled']
+        }
 
         val_log_dict = {
-                "val/loss": test_stats['loss'],
-                "val/loss_ce": test_stats['loss_ce'],
-                "val/loss_coords": test_stats['loss_coords'],
-                "val/loss_coords_unscaled": test_stats['loss_coords_unscaled'],
-                "val/cardinality_error": test_stats['cardinality_error_unscaled'],
-                "val_metrics/room_prec": test_stats['room_prec'],
-                "val_metrics/room_rec": test_stats['room_rec'],
-                "val_metrics/corner_prec": test_stats['corner_prec'],
-                "val_metrics/corner_rec": test_stats['corner_rec'],
-                "val_metrics/angles_prec": test_stats['angles_prec'],
-                "val_metrics/angles_rec": test_stats['angles_rec']
-                }
+            "val/loss": test_stats['loss'],
+            "val/loss_ce": test_stats['loss_ce'],
+            "val/loss_coords": test_stats['loss_coords'],
+            "val/loss_coords_unscaled": test_stats['loss_coords_unscaled'],
+            "val/cardinality_error": test_stats['cardinality_error_unscaled'],
+            "val_metrics/room_prec": test_stats['room_prec'],
+            "val_metrics/room_rec": test_stats['room_rec'],
+            "val_metrics/corner_prec": test_stats['corner_prec'],
+            "val_metrics/corner_rec": test_stats['corner_rec'],
+            "val_metrics/angles_prec": test_stats['angles_prec'],
+            "val_metrics/angles_rec": test_stats['angles_rec']
+        }
 
         if args.semantic_classes > 0:
             # need to log additional metrics for semantically-rich floorplans
@@ -296,11 +317,11 @@ def main(args):
         else:
             # only apply the rasterization loss for non-semantic floorplans
             train_log_dict["train/loss_raster"] = train_stats['loss_raster']
-            val_log_dict["val/loss_raster"] =  test_stats['loss_raster']
+            val_log_dict["val/loss_raster"] = test_stats['loss_raster']
 
         if 'room_iou' in test_stats:
             val_log_dict["val_metrics/room_iou"] = test_stats['room_iou']
-                
+
         wandb.log(train_log_dict)
         wandb.log(val_log_dict)
 
@@ -318,7 +339,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     now = datetime.datetime.now()
     run_id = now.strftime("%Y-%m-%d-%H-%M-%S")
-    args.run_name = run_id+'_'+args.job_name 
+    args.run_name = run_id + '_' + args.job_name
     args.output_dir = os.path.join(args.output_dir, args.run_name)
 
     if args.output_dir:

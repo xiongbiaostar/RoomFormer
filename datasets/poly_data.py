@@ -123,6 +123,7 @@ def make_poly_transforms(image_set):
 
 def build(image_set, args):
     root = Path(args.dataset_root)
+    print(root.exists())
     assert root.exists(), f'provided data path {root} does not exist'
 
     PATHS = {

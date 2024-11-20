@@ -10,6 +10,34 @@ from util.poly_ops import get_all_order_corners
 from diff_ras.polygon import SoftPolygon
 from util.bf_utils import get_union_box, rasterize_instances, POLY_LOSS_REGISTRY
 
+def dn_L1_loss(src_polys, target_polys, target_len):
+    """L1 loss for coordinates regression
+    We only calculate the loss between valid corners since we filter out invalid corners in final results
+    Args:
+        src_polys: Tensor of dim [num_target_polys, num_queries_per_poly*2] with the matched predicted polygons coordinates
+        target_polys: Tensor of dim [num_target_polys, num_queries_per_poly*2] with the target polygons coordinates
+        target_len: list of size num_target_polys, each element indicates 2 * num_corners of this poly
+    """
+    total_loss = 0.
+    index = 0
+    target_polys = target_polys.float()
+    # print("dnl1loss", target_len,target_polys.shape)
+    for length in target_len:
+        tgt_poly_single = target_polys[index:index+int(length/2)]
+        # print("dnl1loss",length,tgt_poly_single)
+        tgt_poly_single = tgt_poly_single.view(-1)
+        # print("这里",tgt_poly_single.shape)
+        all_polys = get_all_order_corners(tgt_poly_single)
+        src_poly_single = src_polys[index:index+int(length/2)]
+        src_poly_single=src_poly_single.reshape(-1)
+        src_poly_single=src_poly_single.unsqueeze(0)
+
+        total_loss += torch.cdist(src_poly_single, all_polys , p=1).min()
+        index += int(length/2)
+    # print("dn",total_loss,target_len.sum())
+    total_loss = total_loss/target_len.sum()
+    return total_loss
+
 def custom_L1_loss(src_polys, target_polys, target_len):
     """L1 loss for coordinates regression
     We only calculate the loss between valid corners since we filter out invalid corners in final results
@@ -22,7 +50,9 @@ def custom_L1_loss(src_polys, target_polys, target_len):
     for i in range(target_polys.shape[0]):
         tgt_poly_single = target_polys[i, :target_len[i]]
         all_polys = get_all_order_corners(tgt_poly_single)
+        # print("L1LOSS",tgt_poly_single.dtype,all_polys.shape,src_polys.dtype)
         total_loss += torch.cdist(src_polys[i, :target_len[i]].unsqueeze(0), all_polys , p=1).min()
+    # print("cus",total_loss, target_len.sum())
     total_loss = total_loss/target_len.sum()
     return total_loss
     
