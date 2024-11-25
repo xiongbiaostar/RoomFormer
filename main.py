@@ -28,9 +28,10 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=500, type=int)
-    parser.add_argument('--lr_drop', default=[1], type=list)
+    parser.add_argument('--lr_drop', default=[300], type=list)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
+    # parser.add_argument('--drop_lr_now', default=True, action='store_true')
 
     parser.add_argument('--sgd', action='store_true')
 
@@ -105,7 +106,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='output/2024-11-19-22-07-00_train_stru3d/checkpoint.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='output/2024-11-23-08-51-48_train_stru3d/checkpoint.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
@@ -114,9 +115,9 @@ def get_args_parser():
     # DN,query selection,look forward twice
     # parser.add_argument('--contrastive', action="store_true",
     #                     help="use contrastive training.")
-    parser.add_argument('--use_mqs', action="store_true", default="true",
+    parser.add_argument('--use_mqs',  default=False,
                         help="use mixed query selection from DINO.")
-    parser.add_argument('--use_lft', action="store_true", default="true",
+    parser.add_argument('--use_lft',  default=True,
                         help="use look forward twice from DINO.")
     parser.add_argument('--use_dn', action="store_true",
                         help="use denoising training.")
@@ -237,14 +238,25 @@ def main(args):
                 pg['initial_lr'] = pg_old['initial_lr']
             print(optimizer.param_groups)
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            print("llllllllllr", checkpoint['lr_scheduler'],lr_scheduler)
+
             # todo: this is a hack for doing experiment that resume from checkpoint and also modify lr scheduler (e.g., decrease lr in advance).
-            args.override_resumed_lr_drop = False
+            args.override_resumed_lr_drop = True
             if args.override_resumed_lr_drop:
                 print(
                     'Warning: (hack) args.override_resumed_lr_drop is set to True, so args.lr_drop would override lr_drop in resumed lr_scheduler.')
                 lr_scheduler.step_size = args.lr_drop
+
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
             lr_scheduler.step(lr_scheduler.last_epoch)
+            # if args.drop_lr_now:
+            #     for param_group in optimizer.param_groups:
+            #         param_group['lr'] = param_group['lr'] * 0.05
+            #         print("llllllllllllllr",param_group['lr'])
+            if lr_scheduler.last_epoch < 350:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = param_group['lr'] * 10
+                    print("llllllllllllllr",param_group['lr'])
             args.start_epoch = checkpoint['epoch'] + 1
         # check the resumed model
         test_stats = evaluate(

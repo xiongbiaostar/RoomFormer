@@ -28,7 +28,7 @@ opts = options.parse()
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0, args = None):
+                    device: torch.device, epoch: int, max_norm: float = 0, args = None,epochs=0):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -39,6 +39,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     for batched_inputs in metric_logger.log_every(data_loader, print_freq, header):
         samples = [x["image"].to(device) for x in batched_inputs]
+
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
         targets = get_gt_polys(gt_instances, model.num_queries_per_poly, device)
@@ -258,7 +259,6 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
         fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners
-
         if 'pred_room_logits' in outputs:
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
             _, pred_room_label = prob[..., :-1].max(-1)
@@ -379,6 +379,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     for metric in metric_category:
         prec = quant_result_dict[metric+'_prec']
         rec = quant_result_dict[metric+'_rec']
+        #print("prec,rec",prec,rec)
         f1 = 2*prec*rec/(prec+rec)
         quant_result_dict[metric+'_f1'] = f1
 

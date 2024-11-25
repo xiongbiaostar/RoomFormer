@@ -70,6 +70,7 @@ class ConvertToCocoDict(object):
         file_name = os.path.join(self.root, path)
 
         img = np.array(Image.open(file_name))
+
         w, h = img.shape
 
         record = {}

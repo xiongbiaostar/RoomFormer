@@ -19,6 +19,24 @@ def get_args_parser():
     parser = argparse.ArgumentParser('RoomFormer', add_help=False)
     parser.add_argument('--batch_size', default=1, type=int)
 
+    # DN,query selection,look forward twice
+    # parser.add_argument('--contrastive', action="store_true",
+    #                     help="use contrastive training.")
+    parser.add_argument('--use_mqs', action="store_true", default=False,
+                        help="use mixed query selection from DINO.")
+    parser.add_argument('--use_lft', action="store_true", default=True,
+                        help="use look forward twice from DINO.")
+    parser.add_argument('--use_dn', action="store_true",
+                        help="use denoising training.")
+    parser.add_argument('--scalar', default=5, type=int,
+                        help="number of dn groups")
+    parser.add_argument('--label_noise_scale', default=0.2, type=float,
+                        help="label noise ratio to flip")
+    parser.add_argument('--box_noise_scale', default=0.4, type=float,
+                        help="box noise scale to shift and scale")
+    parser.add_argument('--contrastive', action="store_true",
+                        help="use contrastive training.")
+
     # backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
                         help="Name of the convolutional backbone to use")
@@ -78,14 +96,14 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--checkpoint', default='output/2024-11-16-09-08-59_train_stru3d/checkpoint0419.pth', help='resume from checkpoint')
-    parser.add_argument('--output_dir', default='eval_stru3d',
+    parser.add_argument('--checkpoint', default='output/2024-11-23-08-51-48_train_stru3d/checkpoint0399.pth', help='resume from checkpoint')
+    parser.add_argument('--output_dir', default='eval_stru3d_0399',
                         help='path where to save result')
 
     # visualization options
-    parser.add_argument('--plot_pred', default=True, type=bool, help="plot predicted floorplan")
-    parser.add_argument('--plot_density', default=True, type=bool, help="plot predicited room polygons overlaid on the density map")
-    parser.add_argument('--plot_gt', default=True, type=bool, help="plot ground truth floorplan")
+    parser.add_argument('--plot_pred', default=False, type=bool, help="plot predicted floorplan")
+    parser.add_argument('--plot_density', default=False, type=bool, help="plot predicited room polygons overlaid on the density map")
+    parser.add_argument('--plot_gt', default=False, type=bool, help="plot ground truth floorplan")
 
 
     return parser

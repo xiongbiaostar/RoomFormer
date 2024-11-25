@@ -169,7 +169,9 @@ class RoomFormer(nn.Module):
         tgt_embeds = self.tgt_embed.weight
         # --------------------------------------
         # preprare for dn
+
         if  self.use_mqs:
+            print("这里？",self.use_mqs)
             query_embeds = None
             tgt_embeds = None
         input_query_label, input_query_polys, attn_mask, mask_dict = \
@@ -208,7 +210,10 @@ class RoomFormer(nn.Module):
 
         if self.use_mqs:
             enc_outputs_coord = enc_outputs_coord_unact.sigmoid()
-            out['enc_outputs'] = {'pred_logits': enc_outputs_class, 'pred_boxes': enc_outputs_coord}
+            # print("ssss",enc_outputs_coord.shape,outputs_coord[-1].shape,enc_outputs_class.shape)
+            enc_outputs_class = enc_outputs_class.reshape(bs,-1,self.num_queries_per_poly)
+            enc_outputs_coord = enc_outputs_coord.reshape(bs,-1,self.num_queries_per_poly,2)
+            out['enc_outputs'] = {'pred_logits': enc_outputs_class, 'pred_coords': enc_outputs_coord}
             if os.environ.get('IPDB_SHILONG_DEBUG') == 'INFO':
                 import ipdb;
                 ipdb.set_trace()

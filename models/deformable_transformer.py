@@ -183,6 +183,7 @@ class DeformableTransformer(nn.Module):
 
         # use mix query selection
         if self.use_mqs:
+            #[bs,1360,2]
             output_memory, output_proposals = self.gen_encoder_output_proposals(memory, mask_flatten, spatial_shapes)
             # hack implementation for two-stage Deformable DETR
 
@@ -195,6 +196,7 @@ class DeformableTransformer(nn.Module):
             # 根据topk_proposals对应的索引从enc_outputs_coord_unact收集坐标值。[bs,topk,2]
             topk_coords_unact = torch.gather(enc_outputs_coord_unact, 1,
                                              topk_proposals.unsqueeze(-1).repeat(1, 1, 2))  # [bs,topk,2]
+
             topk_coords_unact = topk_coords_unact.detach()
             reference_points = topk_coords_unact.sigmoid()
 
