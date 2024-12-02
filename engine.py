@@ -22,13 +22,13 @@ from s3d_floorplan_eval.DataRW.wrong_annotatios import wrong_s3d_annotations_lis
 from scenecad_eval.Evaluator import Evaluator_SceneCAD
 from util.poly_ops import pad_gt_polys, get_gt_polys
 from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan
-
+from util.poly_ops import calculate_angles, douglas_peucker
 options = MCSSOptions()
 opts = options.parse()
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0, args = None,epochs=0):
+                    device: torch.device, epoch: int, max_norm: float = 0, args = None):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -36,13 +36,25 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('grad_norm', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
-
     for batched_inputs in metric_logger.log_every(data_loader, print_freq, header):
         samples = [x["image"].to(device) for x in batched_inputs]
 
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
         targets = get_gt_polys(gt_instances, model.num_queries_per_poly, device)
+        # if epoch<100:
+        #     args.box_noise_scale = 0.5
+        # elif epoch>=100 and epoch<200:
+        #     args.box_noise_scale = 0.4
+        # elif epoch>=200 and epoch<300:
+        #     args.box_noise_scale = 0.3
+        # elif epoch>=300 and epoch<400:
+        #     args.box_noise_scale = 0.2
+        # elif epoch>=400 and epoch<500:
+        #     args.box_noise_scale = 0.1
+        # elif epoch>=500 and epoch<600:
+        #     args.box_noise_scale = 0.05
+
         dn_args = (targets, args.scalar, args.label_noise_scale, args.box_noise_scale)
         if args.contrastive is not False:
             dn_args += (args.contrastive,)
@@ -259,6 +271,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
         fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners
+
         if 'pred_room_logits' in outputs:
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
             _, pred_room_label = prob[..., :-1].max(-1)
@@ -301,7 +314,31 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     if not semantic_rich:
                         # only regular rooms
                         if len(corners)>=4 and Polygon(corners).area >= 100:
-                                room_polys.append(corners)
+                            room_polys.append(corners)
+                            # ang_threshold=np.cos(np.pi / 6)
+                            # angles_corners = calculate_angles(corners)
+                            # valid_indices = [k for k, angle in enumerate(angles_corners) if
+                            #                  abs(angle)< ang_threshold]
+                            # # print(len(valid_indices))
+
+
+                            # valid_points = corners[valid_indices]
+                            # # print("输出看看",scene_ids,i, angles_corners,ang_threshold,valid_indices, corners,valid_points)
+                            # # print("简化1", valid_points,corners,scene_ids)
+                            # # try:
+                            #     # print("道格拉瑟valid")
+
+                            # simplified_points = douglas_peucker(valid_points, 3)
+
+                            # if len(simplified_points)>=4:
+                            #     print("道格拉瑟", simplified_points)
+                            #     simplified_points = np.vstack(simplified_points)
+                            #     room_polys.append(simplified_points)
+
+                            # # except Exception as e:
+                            # #     print("简化1", valid_points, corners, scene_ids)
+                            # #     if len(valid_points)>=4:
+                            # #         room_polys.append(valid_points)
                     else:
                         # regular rooms
                         if pred_room_label_per_scene[j] not in [16,17]:
@@ -334,6 +371,9 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     quant_result_dict[k] += quant_result_dict_scene[k]
 
             scene_counter += 1
+            print("scene-",scene_ids,len(room_polys))
+            if scene_ids[0]==3289:
+                print(pred_logits,fg_mask_per_scene,pred_corners_per_scene.shape)
 
             if plot_pred:
                 if semantic_rich:

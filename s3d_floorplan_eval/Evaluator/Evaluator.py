@@ -517,6 +517,7 @@ class Evaluator():
             corner_metric_prec = sum(corner_metric) / float(pred_corners_n)
         else:
             corner_metric_prec = 0
+        
         corner_metric_rec = sum(corner_metric) / float(gt_corners_n)
 
         ###### metric for angle ######
@@ -526,6 +527,7 @@ class Evaluator():
             angles_metric_prec = sum(angles_metric) / float(pred_corners_n)
         else:
             angles_metric_prec = 0
+        print(sum(angles_metric),float(gt_corners_n))
         angles_metric_rec = sum(angles_metric) / float(gt_corners_n)
 
         # sanity check

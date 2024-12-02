@@ -503,7 +503,7 @@ def build_deforamble_transformer(args):
         enc_n_points=args.enc_n_points,
         query_pos_type=args.query_pos_type,
         use_mqs=args.use_mqs,
-        use_look_forward_twice=True,
+        use_look_forward_twice=args.use_lft,
         num_queries=args.num_queries
 
     )

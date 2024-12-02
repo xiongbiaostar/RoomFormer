@@ -25,10 +25,10 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=2e-5, type=float)
     parser.add_argument('--lr_linear_proj_names', default=['sampling_offsets'], type=str, nargs='+')
     parser.add_argument('--lr_linear_proj_mult', default=0.1, type=float)
-    parser.add_argument('--batch_size', default=2, type=int)
+    parser.add_argument('--batch_size', default=10, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=500, type=int)
-    parser.add_argument('--lr_drop', default=[300], type=list)
+    parser.add_argument('--epochs', default=650, type=int)
+    parser.add_argument('--lr_drop', default=[390], type=list)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
     # parser.add_argument('--drop_lr_now', default=True, action='store_true')
@@ -98,7 +98,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
     parser.add_argument('--dataset_root',
-                        default='/media/liuyiyi/Data/Postgraduate/ProjectWorkSpace/github/RoomFormer/data/stru3d',
+                        default='data/stru3d',
                         type=str)
 
     parser.add_argument('--output_dir', default='output',
@@ -106,11 +106,11 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='output/2024-11-23-08-51-48_train_stru3d/checkpoint.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--job_name', default='train_stru3d', type=str)
+    parser.add_argument('--job_name', default='train_dn+lft', type=str)
 
     # DN,query selection,look forward twice
     # parser.add_argument('--contrastive', action="store_true",
@@ -140,7 +140,7 @@ def main(args):
 
     # setup wandb for logging
     utils.setup_wandb()
-    wandb.init(project="RoomFormer")
+    wandb.init(project="RoomFormer+dn+lft")
     wandb.run.name = args.run_name
 
     device = torch.device(args.device)
@@ -253,10 +253,10 @@ def main(args):
             #     for param_group in optimizer.param_groups:
             #         param_group['lr'] = param_group['lr'] * 0.05
             #         print("llllllllllllllr",param_group['lr'])
-            if lr_scheduler.last_epoch < 350:
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = param_group['lr'] * 10
-                    print("llllllllllllllr",param_group['lr'])
+            # if lr_scheduler.last_epoch > 350:
+            #     for param_group in optimizer.param_groups:
+            #         param_group['lr'] = param_group['lr'] * 0.1
+            #         print("llllllllllllllr",param_group['lr'])
             args.start_epoch = checkpoint['epoch'] + 1
         # check the resumed model
         test_stats = evaluate(
@@ -272,8 +272,12 @@ def main(args):
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 20 epochs
-            if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+            if epoch < 400:
+                if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
+                    checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+            else :
+                if (epoch + 1) in args.lr_drop or (epoch + 1) % 5 == 0:
+                    checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 torch.save({
                     'model': model.state_dict(),

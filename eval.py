@@ -22,7 +22,7 @@ def get_args_parser():
     # DN,query selection,look forward twice
     # parser.add_argument('--contrastive', action="store_true",
     #                     help="use contrastive training.")
-    parser.add_argument('--use_mqs', action="store_true", default=False,
+    parser.add_argument('--use_mqs', default=False,
                         help="use mixed query selection from DINO.")
     parser.add_argument('--use_lft', action="store_true", default=True,
                         help="use look forward twice from DINO.")
@@ -96,8 +96,8 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--checkpoint', default='output/2024-11-23-08-51-48_train_stru3d/checkpoint0399.pth', help='resume from checkpoint')
-    parser.add_argument('--output_dir', default='eval_stru3d_0399',
+    parser.add_argument('--checkpoint', default='/home/lyy/RoomFormer/output/2024-12-01-17-59-22_train_dn+lft/checkpoint0389.pth', help='resume from checkpoint')
+    parser.add_argument('--output_dir', default='eval_stru3d_0.01',
                         help='path where to save result')
 
     # visualization options

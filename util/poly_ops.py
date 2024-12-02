@@ -3,7 +3,8 @@ Utilities for polygon manipulation.
 """
 import torch
 import numpy as np
-
+from shapely.geometry import Polygon, LineString, Point
+import math
 
 def is_clockwise(points):
     """Check whether a sequence of points is clockwise ordered
@@ -115,3 +116,51 @@ def get_gt_polys(gt_instances, num_queries_per_poly, device):
     return room_targets
 
 
+def calculate_angles(corners):
+    points = [Point(point) for point in corners]
+    polygon = Polygon(points)
+
+    angles = []
+    for k in range(len(points)):
+        p1, p2, p3 = points[k - 1] if k > 0 else points[-1], points[k], points[(k + 1) % len(points)]
+        # print("点，",p1,p2,p3,p2==p3)
+        vec1 = (p2.x - p1.x, p2.y - p1.y)
+        vec2 = (p3.x - p2.x, p3.y - p2.y)
+
+        cos_angle = np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e6)
+        # angle = torch.acos(torch.tensor(cos_angle)).item() * 180 / torch.pi  # 转换为度
+        angles.append(cos_angle)
+    return angles
+
+
+def perpendicular_distance(point, start, end):
+    if (start[0] == end[0]) and (start[1] == end[1]):
+        return math.sqrt((point[0] - start[0]) ** 2 + (point[1] - start[1]) ** 2)
+
+    # Calculate the distance
+    num = abs((end[1] - start[1]) * point[0] - (end[0] - start[0]) * point[1] + end[0] * start[1] - end[1] * start[0])
+    denom = math.sqrt((end[1] - start[1]) ** 2 + (end[0] - start[0]) ** 2)
+    return num / denom
+
+
+def douglas_peucker(points, epsilon):
+    # print("points长度",len(points))
+    if len(points) < 2:
+        return points
+    start = points[0]
+    end = points[-1]
+    max_distance = 0.0
+    index = 0
+    for i in range(1, len(points) - 1):
+        distance = perpendicular_distance(points[i], start, end)
+        if distance > max_distance:
+            index = i
+            max_distance = distance
+
+    # If max distance is greater than epsilon, recursively simplify
+    if max_distance > epsilon:
+        left = douglas_peucker(points[:index + 1], epsilon)
+        right = douglas_peucker(points[index:], epsilon)
+        return left[:-1] + right
+    else:
+        return [start, end]

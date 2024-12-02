@@ -249,6 +249,7 @@ class SetCriterion(nn.Module):
         self.matcher = matcher
         self.weight_dict = weight_dict
         self.losses = losses
+        #计算的是真值和预测值之间的相似度。我简单理解一下就是真值多边形和预测多边形之间的IOU
         self.raster_loss = MaskRasterizationLoss(None)
 
 
@@ -297,6 +298,11 @@ class SetCriterion(nn.Module):
         losses = {'cardinality_error': card_err}
         return losses
 
+    def loss_overlaps(self,outputs):
+        assert 'pred_coords' in outputs
+        idx = self._get_src_permutation_idx(indices)
+        bs = outputs['pred_coords'].shape[0]
+        src_polys = outputs['pred_coords'][idx]
 
     def loss_polys(self, outputs, targets, indices):
         """Compute the losses related to the polygons:
