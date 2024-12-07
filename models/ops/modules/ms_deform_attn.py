@@ -101,6 +101,8 @@ class MSDeformAttn(nn.Module):
         # N, Len_q, n_heads, n_levels, n_points, 2
         if reference_points.shape[-1] == 2:
             offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
+            # print(reference_points[:, :, None, :, None, :].shape,sampling_offsets.shape,offset_normalizer[None, None, None, :, None, :].shape)
+            # print(( sampling_offsets / offset_normalizer[None, None, None, :, None, :]).shape)
             sampling_locations = reference_points[:, :, None, :, None, :] \
                                  + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
         elif reference_points.shape[-1] == 4:

@@ -25,10 +25,10 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=2e-5, type=float)
     parser.add_argument('--lr_linear_proj_names', default=['sampling_offsets'], type=str, nargs='+')
     parser.add_argument('--lr_linear_proj_mult', default=0.1, type=float)
-    parser.add_argument('--batch_size', default=10, type=int)
+    parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=650, type=int)
-    parser.add_argument('--lr_drop', default=[390], type=list)
+    parser.add_argument('--lr_drop', default=[400], type=list)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
     # parser.add_argument('--drop_lr_now', default=True, action='store_true')
@@ -45,9 +45,10 @@ def get_args_parser():
     parser.add_argument('--position_embedding_scale', default=2 * np.pi, type=float,
                         help="position / size * scale")
     parser.add_argument('--num_feature_levels', default=4, type=int, help='number of feature levels')
-
+    #输入到transformer decoder中的特征图数目，解码器传入此参数
+    parser.add_argument("--total_feature_levels", default=3, type=int, help='number of feature image input to transformer')
     # Transformer
-    parser.add_argument('--enc_layers', default=6, type=int,
+    parser.add_argument('--enc_layers', default=3, type=int,
                         help="Number of encoding layers in the transformer")
     parser.add_argument('--dec_layers', default=6, type=int,
                         help="Number of decoding layers in the transformer")
@@ -55,6 +56,11 @@ def get_args_parser():
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int,
                         help="Size of the embeddings (dimension of the transformer)")
+    #嵌入的维度？
+    parser.add_argument('--encoder_hidden_dim', default=256, type=int,
+                        help="Size of the encoder embeddings (dimension of the transformer)")
+    parser.add_argument('--decoder_hidden_dim', default=256, type=int,
+                        help="Size of the decoder embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
@@ -98,7 +104,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
     parser.add_argument('--dataset_root',
-                        default='data/stru3d',
+                        default='data/stru3d_slice',
                         type=str)
 
     parser.add_argument('--output_dir', default='output',
@@ -129,6 +135,9 @@ def get_args_parser():
                         help="box noise scale to shift and scale")
     parser.add_argument('--contrastive', action="store_true",
                         help="use contrastive training.")
+    #取最上和最下两层特征图
+    parser.add_argument('--up_down_mode', default=True, type=bool)#实际上并没有用到这个参数做实际操作
+    parser.add_argument('--slice_num', default=5, type=int)
 
     return parser
 
@@ -140,7 +149,7 @@ def main(args):
 
     # setup wandb for logging
     utils.setup_wandb()
-    wandb.init(project="RoomFormer+dn+lft")
+    wandb.init(project="RoomFormer+dn+lft+height")
     wandb.run.name = args.run_name
 
     device = torch.device(args.device)

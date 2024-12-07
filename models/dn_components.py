@@ -178,6 +178,7 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
         padding_label = torch.zeros(pad_size, hidden_dim).cuda()
         padding_coords = torch.zeros(pad_size, 2).cuda() #每个坐标两个点
         if tgt is not None and refpoint_emb is not None:
+            #print(padding_label.shape,tgt.shape)
             input_query_label = torch.cat([padding_label, tgt], dim=0).repeat(batch_size, 1, 1)
             input_query_coords = torch.cat([padding_coords, refpoint_emb], dim=0).repeat(batch_size, 1, 1)
         else:

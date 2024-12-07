@@ -18,7 +18,7 @@ from models import build_model
 def get_args_parser():
     parser = argparse.ArgumentParser('RoomFormer', add_help=False)
     parser.add_argument('--batch_size', default=1, type=int)
-
+    parser.add_argument('--slice_num', default=5, type=int)
     # DN,query selection,look forward twice
     # parser.add_argument('--contrastive', action="store_true",
     #                     help="use contrastive training.")
@@ -48,15 +48,22 @@ def get_args_parser():
     parser.add_argument('--position_embedding_scale', default=2 * np.pi, type=float,
                         help="position / size * scale")
     parser.add_argument('--num_feature_levels', default=4, type=int, help='number of feature levels')
-
+    parser.add_argument("--total_feature_levels", default=3, type=int,
+                        help='number of feature image input to transformer')
+    # 取最上和最下两层特征图
+    parser.add_argument('--up_down_mode', default=True, type=bool)
     # Transformer
-    parser.add_argument('--enc_layers', default=6, type=int,
+    parser.add_argument('--enc_layers', default=3, type=int,
                         help="Number of encoding layers in the transformer")
     parser.add_argument('--dec_layers', default=6, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=1024, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int,
+                        help="Size of the embeddings (dimension of the transformer)")
+    parser.add_argument('--encoder_hidden_dim', default=256, type=int,
+                        help="Size of the embeddings (dimension of the transformer)")
+    parser.add_argument('--decoder_hidden_dim', default=256, type=int,
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
@@ -89,19 +96,19 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
-    parser.add_argument('--dataset_root', default='data/stru3d', type=str)
+    parser.add_argument('--dataset_root', default='data/stru3d_slice', type=str)
     parser.add_argument('--eval_set', default='test', type=str)
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--checkpoint', default='/home/lyy/RoomFormer/output/2024-12-01-17-59-22_train_dn+lft/checkpoint0389.pth', help='resume from checkpoint')
+    parser.add_argument('--checkpoint', default='/home/lyy/RoomFormer/output/2024-12-04-11-33-57_train_dn+lft/checkpoint0519.pth', help='resume from checkpoint')
     parser.add_argument('--output_dir', default='eval_stru3d_0.01',
                         help='path where to save result')
 
     # visualization options
-    parser.add_argument('--plot_pred', default=False, type=bool, help="plot predicted floorplan")
+    parser.add_argument('--plot_pred', default=True, type=bool, help="plot predicted floorplan")
     parser.add_argument('--plot_density', default=False, type=bool, help="plot predicited room polygons overlaid on the density map")
     parser.add_argument('--plot_gt', default=False, type=bool, help="plot ground truth floorplan")
 

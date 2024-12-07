@@ -24,7 +24,7 @@ def _get_clones(module, N):
 class RoomFormer(nn.Module):
     """ This is the RoomFormer module that performs floorplan reconstruction """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_polys, num_feature_levels,
-                 aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1, use_mqs=False):
+                 aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1,slice_num = 1,up_down_mode = True,use_mqs = False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -38,49 +38,65 @@ class RoomFormer(nn.Module):
             with_poly_refine: iterative polygon refinement
         """
         super().__init__()
+        #设置参数
         self.num_queries = num_queries
         self.num_polys = num_polys
+        self.slice_num = slice_num
+        self.up_down_mode = up_down_mode
         assert  num_queries % num_polys == 0
         self.transformer = transformer
-        hidden_dim = transformer.d_model
-        self.class_embed = nn.Linear(hidden_dim, num_classes)
-        self.coords_embed = MLP(hidden_dim, hidden_dim, 2, 3)
+         #d_model表示经过位置编码后单个Transformer输入向量的维度
+        encoder_dim = transformer.encoder_dim
+        decoder_dim = transformer.decoder_dim
+        #hidden_dim = transformer.d_model
+                #类编码器，用了一个线性层，将最后的输出分类用的？
+        self.class_embed = nn.Linear(decoder_dim, num_classes)
+        #坐标编码器，用了一个MLP实现
+        self.coords_embed = MLP(decoder_dim, decoder_dim, 2, 3)
         self.num_feature_levels = num_feature_levels
-
+        #将角点查询数目编码为一个二维编码
         self.query_embed = nn.Embedding(num_queries, 2)
-        self.tgt_embed = nn.Embedding(num_queries, hidden_dim-1)
+        #将角点数目编码为一个hidden_dim大小的编码
+        self.tgt_embed = nn.Embedding(num_queries, decoder_dim-1)
 
         # dn label enc
         self.num_classes = num_classes
         self.hidden_dim = transformer.d_model
-        self.label_enc = nn.Embedding(num_classes + 1, hidden_dim - 1)  # # for indicator
+        self.label_enc = nn.Embedding(num_classes + 1, decoder_dim - 1)  # # for indicator
 
         #use_mqs
         self.use_mqs = use_mqs
 
         if num_feature_levels > 1:
+            #num_backbone_outs应当是存储了backbone总共输出的特征图数。即传入下一层的多层次特征图
             num_backbone_outs = len(backbone.strides)
             input_proj_list = []
+            #对于要输出的特征图，以kernelsize = 1的情况输出，这表示经过变换的特征图和原先该层级输出的大小一样
             for _ in range(num_backbone_outs):
                 in_channels = backbone.num_channels[_]
                 input_proj_list.append(nn.Sequential(
-                    nn.Conv2d(in_channels, hidden_dim, kernel_size=1),
-                    nn.GroupNorm(32, hidden_dim),
+                    nn.Conv2d(in_channels, encoder_dim, kernel_size=1),
+                    nn.GroupNorm(32, encoder_dim),
                 ))
+            #对于剩下的层级，输出特征图大小约为原来的二分之一
             for _ in range(num_feature_levels - num_backbone_outs):
                 input_proj_list.append(nn.Sequential(
-                    nn.Conv2d(in_channels, hidden_dim, kernel_size=3, stride=2, padding=1),
-                    nn.GroupNorm(32, hidden_dim),
+                    nn.Conv2d(in_channels, encoder_dim, kernel_size=3, stride=2, padding=1),
+                    nn.GroupNorm(32, encoder_dim),
                 ))
-                in_channels = hidden_dim
+                in_channels = encoder_dim
+            #input_proj应当是存储了resnet50每一块的特征图中间的映射神经网络
             self.input_proj = nn.ModuleList(input_proj_list)
         else:
             self.input_proj = nn.ModuleList([
                 nn.Sequential(
-                    nn.Conv2d(backbone.num_channels[0], hidden_dim, kernel_size=1),
-                    nn.GroupNorm(32, hidden_dim),
+                    nn.Conv2d(backbone.num_channels[0], encoder_dim, kernel_size=1),
+                    nn.GroupNorm(32, encoder_dim),
                 )])
         self.backbone = backbone
+        #heightformer其实也没用上
+        #self.block_slicer = block_slicer
+
         self.aux_loss = aux_loss
         self.with_poly_refine = with_poly_refine
 
@@ -140,29 +156,47 @@ class RoomFormer(nn.Module):
         """
         if not isinstance(samples, NestedTensor):
             samples = nested_tensor_from_tensor_list(samples)
-        features, pos = self.backbone(samples)
+        #features, pos = self.backbone(samples)
 
         bs = samples.tensors.shape[0]
         srcs = []
         masks = []
+        pos = []
+
+        bs, sliceN, h, w = samples.tensors.shape
+        temp_samples = copy.deepcopy(samples)
+        temp_samples.mask = torch.repeat_interleave(temp_samples.mask, sliceN, dim=0)
+        temp_samples.tensors = temp_samples.tensors.view(bs*sliceN, 1, h, w)
+        # print("backbone输入",temp_samples.tensors.shape)
+        features, pos_temp = self.backbone(temp_samples)
+        # print("backbone输出",len(features),len(pos_temp))
+
         for l, feat in enumerate(features):
-            src, mask = feat.decompose()
-            srcs.append(self.input_proj[l](src))
-            masks.append(mask)
-            assert mask is not None
-        if self.num_feature_levels > len(srcs):
-            _len_srcs = len(srcs)
-            for l in range(_len_srcs, self.num_feature_levels):
-                if l == _len_srcs:
-                    src = self.input_proj[l](features[-1].tensors)
-                else:
-                    src = self.input_proj[l](srcs[-1])
-                m = samples.mask
-                mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
-                pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
-                srcs.append(src)
-                masks.append(mask)
-                pos.append(pos_l)
+            # print("zhe",l)3
+            level_src, level_mask = feat.decompose()
+            new_h,new_w = level_src.shape[-2:]
+            proj_res = self.input_proj[l](level_src)
+            chan = proj_res.shape[-3]
+            srcs.append(proj_res.view(bs, sliceN, chan, new_h, new_w))
+            masks.append(level_mask.view(bs, sliceN, new_h, new_w))
+            # print("zhe",len(srcs),len(masks))3,3
+        for l, pos_level in enumerate(pos_temp):
+            chan, new_h, new_w = pos_level.shape[-3:]
+            pos.append(pos_level.view(bs, sliceN, chan, new_h, new_w))
+
+        # if self.num_feature_levels > len(srcs):
+        #     _len_srcs = len(srcs)
+        #     for l in range(_len_srcs, self.num_feature_levels):
+        #         if l == _len_srcs:
+        #             src = self.input_proj[l](features[-1].tensors)
+        #         else:
+        #             src = self.input_proj[l](srcs[-1])
+        #         m = samples.mask
+        #         mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
+        #         pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
+        #         srcs.append(src)
+        #         masks.append(mask)
+        #         pos.append(pos_l)
 
 
         query_embeds = self.query_embed.weight
@@ -175,7 +209,7 @@ class RoomFormer(nn.Module):
             query_embeds = None
             tgt_embeds = None
         input_query_label, input_query_polys, attn_mask, mask_dict = \
-            prepare_for_dn(dn_args, tgt_embeds, query_embeds, src.size(0), self.training, self.num_queries,
+            prepare_for_dn(dn_args, tgt_embeds, query_embeds, bs, self.training, self.num_queries,
                            self.num_classes,
                            self.hidden_dim, self.label_enc)
         # print("preprare for dn",input_query_label.shape,input_query_polys.shape,query_embeds.shape,tgt_embeds.shape)
@@ -328,6 +362,7 @@ class SetCriterion(nn.Module):
 
         return losses
 
+
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -420,6 +455,7 @@ def build(args, train=True):
 
     backbone = build_backbone(args)
     transformer = build_deforamble_transformer(args)
+
     model = RoomFormer(
         backbone,
         transformer,
@@ -431,6 +467,8 @@ def build(args, train=True):
         with_poly_refine=args.with_poly_refine,
         masked_attn=args.masked_attn,
         semantic_classes=args.semantic_classes,
+        slice_num = args.slice_num,
+        up_down_mode = args.up_down_mode,
         use_mqs=args.use_mqs
     )
 

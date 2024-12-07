@@ -233,6 +233,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     for batched_inputs in data_loader:
 
         samples = [x["image"].to(device) for x in batched_inputs]
+        print(samples[0].shape)
         scene_ids = [x["image_id"] for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
 
@@ -314,31 +315,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     if not semantic_rich:
                         # only regular rooms
                         if len(corners)>=4 and Polygon(corners).area >= 100:
-                            room_polys.append(corners)
-                            # ang_threshold=np.cos(np.pi / 6)
-                            # angles_corners = calculate_angles(corners)
-                            # valid_indices = [k for k, angle in enumerate(angles_corners) if
-                            #                  abs(angle)< ang_threshold]
-                            # # print(len(valid_indices))
-
-
-                            # valid_points = corners[valid_indices]
-                            # # print("输出看看",scene_ids,i, angles_corners,ang_threshold,valid_indices, corners,valid_points)
-                            # # print("简化1", valid_points,corners,scene_ids)
-                            # # try:
-                            #     # print("道格拉瑟valid")
-
-                            # simplified_points = douglas_peucker(valid_points, 3)
-
-                            # if len(simplified_points)>=4:
-                            #     print("道格拉瑟", simplified_points)
-                            #     simplified_points = np.vstack(simplified_points)
-                            #     room_polys.append(simplified_points)
-
-                            # # except Exception as e:
-                            # #     print("简化1", valid_points, corners, scene_ids)
-                            # #     if len(valid_points)>=4:
-                            # #         room_polys.append(valid_points)
+                                room_polys.append(corners)
                     else:
                         # regular rooms
                         if pred_room_label_per_scene[j] not in [16,17]:
@@ -350,7 +327,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                             window_doors.append(corners)
                             window_doors_types.append(pred_room_label_per_scene[j])
 
-
+            # print(torch.sigmoid(pred_logits))
             if dataset_name == 'stru3d':
                 if not semantic_rich:
                     quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys)
@@ -371,9 +348,6 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     quant_result_dict[k] += quant_result_dict_scene[k]
 
             scene_counter += 1
-            print("scene-",scene_ids,len(room_polys))
-            if scene_ids[0]==3289:
-                print(pred_logits,fg_mask_per_scene,pred_corners_per_scene.shape)
 
             if plot_pred:
                 if semantic_rich:
@@ -395,6 +369,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 else:
                     # plot regular room floorplan
                     room_polys = [np.array(r) for r in room_polys]
+                    # print("room_polys",room_polys)
                     floorplan_map = plot_floorplan_with_regions(room_polys, scale=1000)
                     cv2.imwrite(os.path.join(output_dir, '{}_pred_floorplan.png'.format(scene_ids[i])), floorplan_map)
 
@@ -419,7 +394,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     for metric in metric_category:
         prec = quant_result_dict[metric+'_prec']
         rec = quant_result_dict[metric+'_rec']
-        #print("prec,rec",prec,rec)
+        # print(metric,prec,rec)
         f1 = 2*prec*rec/(prec+rec)
         quant_result_dict[metric+'_f1'] = f1
 
