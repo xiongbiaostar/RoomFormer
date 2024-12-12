@@ -42,18 +42,18 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
         targets = get_gt_polys(gt_instances, model.num_queries_per_poly, device)
-        # if epoch<100:
-        #     args.box_noise_scale = 0.5
-        # elif epoch>=100 and epoch<200:
-        #     args.box_noise_scale = 0.4
-        # elif epoch>=200 and epoch<300:
-        #     args.box_noise_scale = 0.3
-        # elif epoch>=300 and epoch<400:
-        #     args.box_noise_scale = 0.2
-        # elif epoch>=400 and epoch<500:
-        #     args.box_noise_scale = 0.1
-        # elif epoch>=500 and epoch<600:
-        #     args.box_noise_scale = 0.05
+        if epoch<100:
+            args.box_noise_scale = 0.05
+        elif epoch>=100 and epoch<200:
+            args.box_noise_scale = 0.1
+        elif epoch>=200 and epoch<300:
+            args.box_noise_scale = 0.2
+        elif epoch>=300 and epoch<400:
+            args.box_noise_scale = 0.3
+        elif epoch>=400 and epoch<500:
+            args.box_noise_scale = 0.4
+        elif epoch>=500 and epoch<600:
+            args.box_noise_scale = 0.4
 
         dn_args = (targets, args.scalar, args.label_noise_scale, args.box_noise_scale)
         if args.contrastive is not False:

@@ -146,10 +146,13 @@ class RoomFormer(nn.Module):
         srcs = []
         masks = []
         for l, feat in enumerate(features):
+
             src, mask = feat.decompose()
             srcs.append(self.input_proj[l](src))
             masks.append(mask)
             assert mask is not None
+        # print("backbone输出的",len(features),len(srcs))#3,3
+
         if self.num_feature_levels > len(srcs):
             _len_srcs = len(srcs)
             for l in range(_len_srcs, self.num_feature_levels):
@@ -302,7 +305,8 @@ class SetCriterion(nn.Module):
         assert 'pred_coords' in outputs
         idx = self._get_src_permutation_idx(indices)
         bs = outputs['pred_coords'].shape[0]
-        src_polys = outputs['pred_coords'][idx]
+        src_polys = outputs['pred_coords'][idx] #[poly_num,40,2]
+        
 
     def loss_polys(self, outputs, targets, indices):
         """Compute the losses related to the polygons:

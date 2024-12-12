@@ -64,7 +64,9 @@ class BackboneBase(nn.Module):
     def __init__(self, backbone: nn.Module, train_backbone: bool, return_interm_layers: bool):
         super().__init__()
         for name, parameter in backbone.named_parameters():
-            if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+            print("name",name)
+            if not train_backbone :#or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+                print("会执行吗？")
                 parameter.requires_grad_(False)
         if return_interm_layers:
             return_layers = {"layer2": "0", "layer3": "1", "layer4": "2"}
@@ -128,6 +130,7 @@ class Joiner(nn.Sequential):
 def build_backbone(args):
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
+    print("ss",train_backbone)
     return_interm_layers = args.num_feature_levels > 1
     backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
     model = Joiner(backbone, position_embedding)
