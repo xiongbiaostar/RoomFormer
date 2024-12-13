@@ -14,6 +14,7 @@ import util.misc as utils
 from datasets import build_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
+from torch.utils.tensorboard import SummaryWriter
 
 os.environ["WANDB_MODE"] = "offline"
 
@@ -142,6 +143,7 @@ def main(args):
     utils.setup_wandb()
     wandb.init(project="RoomFormer+dn+lft")
     wandb.run.name = args.run_name
+    tensorboardwriter = SummaryWriter(f"tblogs/{args.run_name}")
 
     device = torch.device(args.device)
 
@@ -344,6 +346,26 @@ def main(args):
         if args.output_dir:
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+        tensorboardwriter.add_scalar('training loss/loss_all', train_log_dict["train/loss"], epoch)
+        tensorboardwriter.add_scalar('training loss/loss_ce', train_log_dict["train/loss_ce"], epoch)
+        tensorboardwriter.add_scalar('training loss/loss_coords', train_log_dict["train/loss_coords"], epoch)
+        tensorboardwriter.add_scalar('training loss/loss_raster', train_log_dict["train/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('training loss/tgt_loss_ce', train_log_dict["train/tgt_loss_ce"], epoch)
+        tensorboardwriter.add_scalar('training loss/tgt_loss_coords', train_log_dict["train/tgt_loss_coords"], epoch)
+        tensorboardwriter.add_scalar('training dn vs. matching/dn_loss',
+                                    train_log_dict["train/tgt_loss_ce"] + train_log_dict["train/tgt_loss_coords"], epoch)
+        tensorboardwriter.add_scalar('training dn vs. matching/matching_loss',
+                                    train_log_dict["train/loss_coords"] + train_log_dict["train/loss_ce"]+train_log_dict["train/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss', val_log_dict["val/loss"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss_ce', val_log_dict["val/loss_ce"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss_coords', val_log_dict["val/loss_coords"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss_raster', val_log_dict["val/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/room_prec', val_log_dict["val_metrics/room_prec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/room_rec', val_log_dict["val_metrics/room_rec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/corner_prec', val_log_dict["val_metrics/corner_prec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/corner_rec', val_log_dict["val_metrics/corner_rec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/angle_prec', val_log_dict["val_metrics/angles_prec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/angle_rec', val_log_dict["val_metrics/angles_rec"], epoch)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
