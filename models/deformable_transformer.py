@@ -344,7 +344,7 @@ class StandardFFN(nn.Module):
         return src
 class TemporalTransformerEncoderLayer(nn.Module):
     def __init__(self,
-                 feat_num = 3, d_model=256, dropout=0.1,
+                 feat_num = 4, d_model=256, dropout=0.1,
                  slice_num=5, n_heads=8, n_points=4):
         super().__init__()
 
@@ -402,7 +402,7 @@ class CombineEncoderLayer(nn.Module):
         self.space_attn = SpatialTransformerEncoderLayer(d_model,dropout,n_levels,n_heads,n_points)
         self.ffn1 = StandardFFN(d_model, d_ffn, dropout, activation)
         # hard code，remember to change
-        self.timeAttention = TemporalTransformerEncoderLayer(feat_num=3, d_model=256, dropout=0.1,
+        self.timeAttention = TemporalTransformerEncoderLayer(feat_num=4, d_model=256, dropout=0.1,
                                                              slice_num=5, n_heads=8, n_points=4)
         self.ffn2 = StandardFFN(d_model, d_ffn, dropout, activation)
 
@@ -752,7 +752,7 @@ def build_deforamble_transformer(args):
         poly_refine=args.with_poly_refine,
         return_intermediate_dec=True,
         aux_loss=args.aux_loss,
-        num_feature_levels=args.total_feature_levels,
+        num_feature_levels=args.num_feature_levels,
         dec_n_points=args.dec_n_points,
         enc_n_points=args.enc_n_points,
         query_pos_type=args.query_pos_type,

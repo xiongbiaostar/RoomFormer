@@ -176,7 +176,9 @@ class RoomFormer(nn.Module):
             level_src, level_mask = feat.decompose()
             new_h,new_w = level_src.shape[-2:]
             proj_res = self.input_proj[l](level_src)
+            
             chan = proj_res.shape[-3]
+            
             srcs.append(proj_res.view(bs, sliceN, chan, new_h, new_w))
             masks.append(level_mask.view(bs, sliceN, new_h, new_w))
             # print("zhe",len(srcs),len(masks))3,3
@@ -184,21 +186,25 @@ class RoomFormer(nn.Module):
             chan, new_h, new_w = pos_level.shape[-3:]
             pos.append(pos_level.view(bs, sliceN, chan, new_h, new_w))
 
-        # if self.num_feature_levels > len(srcs):
-        #     _len_srcs = len(srcs)
-        #     for l in range(_len_srcs, self.num_feature_levels):
-        #         if l == _len_srcs:
-        #             src = self.input_proj[l](features[-1].tensors)
-        #         else:
-        #             src = self.input_proj[l](srcs[-1])
-        #         m = samples.mask
-        #         mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
-        #         pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
-        #         srcs.append(src)
-        #         masks.append(mask)
-        #         pos.append(pos_l)
+        if self.num_feature_levels > len(srcs):
+            _len_srcs = len(srcs)
+            for l in range(_len_srcs, self.num_feature_levels):
+                if l == _len_srcs:
+                    src = self.input_proj[l](features[-1].tensors)
+                else:
+                    src = self.input_proj[l](srcs[-1])
 
-
+                _,c,new_h,new_w = src.shape
+                m = temp_samples.mask
+                
+                mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
+                pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
+                # print("??",mask.shape,m.shape,samples.tensors.shape,samples.mask.shape,temp_samples.mask.shape) 
+                # print("??",mask.shape,m.shape,samples.tensors.shape,samples.masks.tensors.shape)
+                srcs.append(src.view(bs, sliceN, c, new_h, new_w))
+                masks.append(mask.view(bs, sliceN, new_h, new_w))
+                pos.append(pos_l.view(bs, sliceN, c, new_h, new_w))
+        #print(len(srcs),len(masks))
         query_embeds = self.query_embed.weight
         tgt_embeds = self.tgt_embed.weight
         # --------------------------------------
