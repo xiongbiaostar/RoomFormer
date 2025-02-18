@@ -67,7 +67,7 @@ def pad_gt_polys(gt_instances, num_queries_per_poly, device):
             corner_labels.append(labels_pad)
 
         room_dict = {
-            'coords': torch.stack(room_corners),
+            'coords': torch.stack(room_corners), #[num_polys,80]
             'labels': torch.stack(corner_labels),
             'lengths': torch.tensor(corner_lengths, device=device),
             'room_labels': gt_inst.gt_classes
@@ -77,4 +77,53 @@ def pad_gt_polys(gt_instances, num_queries_per_poly, device):
 
     return room_targets
 
+
+def pad_gt_polys_to_edges(gt_instances, num_queries_per_poly, device):
+    """Pad the ground truth polygons so that they have a uniform length
+    """
+
+    room_targets = []
+    # padding ground truth on-fly
+    for gt_inst in gt_instances:
+        room_dict = {}
+        room_corners = []
+        corner_labels = []
+        corner_lengths = []
+
+        for i, poly in enumerate(gt_inst.gt_masks.polygons):
+            corners = torch.from_numpy(poly[0])
+            corners = torch.clip(corners, 0, 255) / 255
+            num_corners = len(corners) // 2
+            corners = corners.view(num_corners, 2)
+            edges = torch.zeros((num_corners, 2, 2))
+ 
+            for i in range(num_corners):
+                next_index = (i + 1) % num_corners
+                edge_start = corners[i]
+                edge_end = corners[next_index]
+                edges[i] = torch.stack([edge_start, edge_end])
+            
+            edges = edges.view(-1).to(device)
+            
+            corner_lengths.append(len(edges))
+
+            corners_pad = torch.zeros(num_queries_per_poly*4, device=device)
+            corners_pad[:len(edges)] = edges
+
+            labels = torch.ones(int(len(edges)/4), dtype=torch.int64).to(device) 
+            labels_pad = torch.zeros(num_queries_per_poly, device=device) #[80]
+            labels_pad[:len(labels)] = labels
+            room_corners.append(corners_pad)
+            corner_labels.append(labels_pad)
+
+        room_dict = {
+            'coords': torch.stack(room_corners), #[num_polys,80]
+            'labels': torch.stack(corner_labels),
+            'lengths': torch.tensor(corner_lengths, device=device),
+            'room_labels': gt_inst.gt_classes
+        }
+        room_targets.append(room_dict)
+
+
+    return room_targets
 

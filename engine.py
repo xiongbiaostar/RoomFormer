@@ -20,7 +20,7 @@ from s3d_floorplan_eval.DataRW.S3DRW import S3DRW
 from s3d_floorplan_eval.DataRW.wrong_annotatios import wrong_s3d_annotations_list
 
 from scenecad_eval.Evaluator import Evaluator_SceneCAD
-from util.poly_ops import pad_gt_polys
+from util.poly_ops import pad_gt_polys,pad_gt_polys_to_edges
 from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan
 
 options = MCSSOptions()
@@ -40,7 +40,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     for batched_inputs in metric_logger.log_every(data_loader, print_freq, header):
         samples = [x["image"].to(device) for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
-        room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
+        room_targets = pad_gt_polys_to_edges(gt_instances, model.num_queries_per_poly, device)
 
         outputs = model(samples)
         loss_dict = criterion(outputs, room_targets)
@@ -89,7 +89,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         samples = [x["image"].to(device) for x in batched_inputs]
         scene_ids = [x["image_id"]for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
-        room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
+        room_targets = pad_gt_polys_to_edges(gt_instances, model.num_queries_per_poly, device)
 
 
         outputs = model(samples)
@@ -142,6 +142,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
                 valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
                 if len(valid_corners_per_room)>0:
                     corners = (valid_corners_per_room * 255).cpu().numpy()
+                    corners = corners[:,:2]
                     corners = np.around(corners).astype(np.int32)
 
                     if not semantic_rich:
@@ -290,6 +291,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
                 if len(valid_corners_per_room)>0:
                     corners = (valid_corners_per_room * 255).cpu().numpy()
+                    corners = corners[:,:2]
                     corners = np.around(corners).astype(np.int32)
 
                     if not semantic_rich:

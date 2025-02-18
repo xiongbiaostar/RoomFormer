@@ -22,7 +22,7 @@ def _get_clones(module, N):
 class RoomFormer(nn.Module):
     """ This is the RoomFormer module that performs floorplan reconstruction """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_polys, num_feature_levels,
-                 aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1):
+                 aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1,use_encoder=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -36,16 +36,19 @@ class RoomFormer(nn.Module):
             with_poly_refine: iterative polygon refinement
         """
         super().__init__()
-        self.num_queries = num_queries
+        self.num_queries = num_queries #一条边有两个端点
         self.num_polys = num_polys
         assert  num_queries % num_polys == 0
         self.transformer = transformer
         hidden_dim = transformer.d_model
         self.class_embed = nn.Linear(hidden_dim, num_classes)
-        self.coords_embed = MLP(hidden_dim, hidden_dim, 2, 3)
+        #表示两个端点
+        self.coords_embed = MLP(hidden_dim, hidden_dim, 4, 3)
+        
+        self.linesegs_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.num_feature_levels = num_feature_levels
 
-        self.query_embed = nn.Embedding(num_queries, 2)
+        self.query_embed = nn.Embedding(num_queries, 4)
         self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
         if num_feature_levels > 1:
             num_backbone_outs = len(backbone.strides)
@@ -78,23 +81,38 @@ class RoomFormer(nn.Module):
         self.class_embed.bias.data = torch.ones(num_classes) * bias_value
         nn.init.constant_(self.coords_embed.layers[-1].weight.data, 0)
         nn.init.constant_(self.coords_embed.layers[-1].bias.data, 0)
+        if use_encoder:
+            nn.init.constant_(self.linesegs_embed.layers[-1].weight.data, 0)
+            nn.init.constant_(self.linesegs_embed.layers[-1].bias.data, 0)
         for proj in self.input_proj:
             nn.init.xavier_uniform_(proj[0].weight, gain=1)
             nn.init.constant_(proj[0].bias, 0)
 
-        num_pred = transformer.decoder.num_layers
+        num_pred = transformer.decoder.num_layers+1 if use_encoder else transformer.decoder.num_layers
         
         if with_poly_refine:
             self.class_embed = _get_clones(self.class_embed, num_pred)
             self.coords_embed = _get_clones(self.coords_embed, num_pred)
             nn.init.constant_(self.coords_embed[0].layers[-1].bias.data[2:], -2.0)
+            #------------------------------
+            if use_encoder:
+                self.linesegs_embed = _get_clones(self.linesegs_embed, num_pred)
+                nn.init.constant_(self.linesegs_embed[0].layers[-1].bias.data[2:], -2.0)
+            # hack implementation for iterative bounding box refinement
+            #------------------------------/
         else:
             nn.init.constant_(self.coords_embed.layers[-1].bias.data[2:], -2.0)
             self.class_embed = nn.ModuleList([self.class_embed for _ in range(num_pred)])
             self.coords_embed = nn.ModuleList([self.coords_embed for _ in range(num_pred)])
+            if use_encoder:
+                self.linesegs_embed = nn.ModuleList([self.linesegs_embed for _ in range(num_pred)])
 
         self.transformer.decoder.coords_embed = self.coords_embed
         self.transformer.decoder.class_embed = self.class_embed
+        if use_encoder:
+            self.transformer.decoder.linesegs_embed = self.linesegs_embed
+            for lineseg_embed in self.linesegs_embed:
+                nn.init.constant_(lineseg_embed.layers[-1].bias.data[2:], 0.0)
         
         # Semantically-rich floorplan
         self.room_class_embed = None
@@ -161,7 +179,7 @@ class RoomFormer(nn.Module):
 
         num_layer = hs.shape[0]
         outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
-        outputs_coord = inter_references.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 2)
+        outputs_coord = inter_references.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 4)
         
         out = {'pred_logits': outputs_class[-1], 'pred_coords': outputs_coord[-1]}
 

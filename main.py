@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-import wandb
+
 import torch
 from torch.utils.data import DataLoader
 import util.misc as utils
@@ -15,6 +15,7 @@ from datasets import build_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
 
+from torch.utils.tensorboard import SummaryWriter
 
 
 def get_args_parser():
@@ -103,7 +104,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/home/lyy/lineformer/output/2025-01-16-10-17-06_train_stru3d/checkpoint0399.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
@@ -118,10 +119,8 @@ def main(args):
 
     print(args)
 
-    # setup wandb for logging
-    utils.setup_wandb()
-    wandb.init(project="RoomFormer")
-    wandb.run.name = args.run_name
+    tensorboardwriter = SummaryWriter(f"tblogs/{args.run_name}")
+
 
     device = torch.device(args.device)
 
@@ -218,12 +217,14 @@ def main(args):
             print(optimizer.param_groups)
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             # todo: this is a hack for doing experiment that resume from checkpoint and also modify lr scheduler (e.g., decrease lr in advance).
-            args.override_resumed_lr_drop = False
+            args.override_resumed_lr_drop = True
             if args.override_resumed_lr_drop:
                 print('Warning: (hack) args.override_resumed_lr_drop is set to True, so args.lr_drop would override lr_drop in resumed lr_scheduler.')
                 lr_scheduler.step_size = args.lr_drop
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
             lr_scheduler.step(lr_scheduler.last_epoch)
+            # for param_group in optimizer.param_groups:
+            #     param_group['lr'] = param_group['lr'] * 10
             args.start_epoch = checkpoint['epoch'] + 1
         # check the resumed model
         test_stats = evaluate(
@@ -259,8 +260,8 @@ def main(args):
                      'epoch': epoch,
                      'n_parameters': n_parameters}
         
-        wandb.log({"epoch": epoch})
-        wandb.log({"lr_rate": train_stats['lr']})
+      
+       
 
         train_log_dict = {
                 "train/loss": train_stats['loss'],
@@ -301,12 +302,29 @@ def main(args):
         if 'room_iou' in test_stats:
             val_log_dict["val_metrics/room_iou"] = test_stats['room_iou']
                 
-        wandb.log(train_log_dict)
-        wandb.log(val_log_dict)
+
 
         if args.output_dir:
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+        tensorboardwriter.add_scalar('lr',train_stats['lr'] , epoch)
+        tensorboardwriter.add_scalar('training loss/loss_all', train_log_dict["train/loss"], epoch)
+        tensorboardwriter.add_scalar('training loss/loss_ce', train_log_dict["train/loss_ce"], epoch)
+        tensorboardwriter.add_scalar('training loss/loss_coords', train_log_dict["train/loss_coords"], epoch)
+        tensorboardwriter.add_scalar('training loss/loss_raster', train_log_dict["train/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('training dn vs. matching/matching_loss',
+                                    train_log_dict["train/loss_coords"] + train_log_dict["train/loss_ce"]+train_log_dict["train/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss', val_log_dict["val/loss"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss_ce', val_log_dict["val/loss_ce"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss_coords', val_log_dict["val/loss_coords"], epoch)
+        tensorboardwriter.add_scalar('validation loss/loss_raster', val_log_dict["val/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/room_prec', val_log_dict["val_metrics/room_prec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/room_rec', val_log_dict["val_metrics/room_rec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/corner_prec', val_log_dict["val_metrics/corner_prec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/corner_rec', val_log_dict["val_metrics/corner_rec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/angle_prec', val_log_dict["val_metrics/angles_prec"], epoch)
+        tensorboardwriter.add_scalar('validation metrics/angle_rec', val_log_dict["val_metrics/angles_rec"], epoch)
+
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
