@@ -33,7 +33,7 @@ def get_args_parser():
                         help='gradient clipping max norm')
 
     parser.add_argument('--sgd', action='store_true')
-
+#duima
 
     # backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
