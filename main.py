@@ -33,7 +33,6 @@ def get_args_parser():
                         help='gradient clipping max norm')
 
     parser.add_argument('--sgd', action='store_true')
-#duima
 
     # backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -104,7 +103,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/home/lyy/lineformer/output/2025-01-16-10-17-06_train_stru3d/checkpoint0399.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
