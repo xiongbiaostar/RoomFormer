@@ -27,8 +27,8 @@ def get_args_parser():
     parser.add_argument('--lr_linear_proj_mult', default=0.1, type=float)
     parser.add_argument('--batch_size', default=10, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=500, type=int)
-    parser.add_argument('--lr_drop', default=[400], type=list)
+    parser.add_argument('--epochs', default=650, type=int)
+    parser.add_argument('--lr_drop', default=[520], type=list)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
 
@@ -96,7 +96,7 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
-    parser.add_argument('--dataset_root', default='data/stru3d', type=str)
+    parser.add_argument('--dataset_root', default='/home/lyy/edge/data/stru3d', type=str)
 
     parser.add_argument('--output_dir', default='output',
                         help='path where to save, empty for no saving')
@@ -107,8 +107,15 @@ def get_args_parser():
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--job_name', default='train_stru3d', type=str)
-
+    parser.add_argument('--job_name', default='edge', type=str)
+    parser.add_argument('--use_dn', action="store_true",
+                        help="use denoising training.")
+    parser.add_argument('--scalar', default=5, type=int,
+                        help="number of dn groups")
+    parser.add_argument('--label_noise_scale', default=0.2, type=float,
+                        help="label noise ratio to flip")
+    parser.add_argument('--poly_noise_scale', default=0.4, type=float,
+                        help="poly noise scale to shift and scale")
     return parser
 
 
@@ -234,13 +241,17 @@ def main(args):
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         train_stats = train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
+            model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm,args=args)
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 20 epochs
-            if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+            if epoch < 400:
+                if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
+                    checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+            else :
+                if (epoch + 1) in args.lr_drop or (epoch + 1) % 10 == 0:
+                    checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 torch.save({
                     'model': model.state_dict(),
@@ -263,26 +274,28 @@ def main(args):
        
 
         train_log_dict = {
-                "train/loss": train_stats['loss'],
-                "train/loss_ce": train_stats['loss_ce'],
-                "train/loss_coords": train_stats['loss_coords'],
-                "train/loss_coords_unscaled": train_stats['loss_coords_unscaled'],
-                "train/cardinality_error": train_stats['cardinality_error_unscaled']
-                }
+            "train/loss": train_stats['loss'],
+            "train/loss_ce": train_stats['loss_ce'],
+            "train/loss_coords": train_stats['loss_coords'],
+            "train/tgt_loss_ce": train_stats['tgt_loss_ce'],
+            "train/tgt_loss_coords": train_stats['tgt_loss_coords'],
+            "train/loss_coords_unscaled": train_stats['loss_coords_unscaled'],
+            "train/cardinality_error": train_stats['cardinality_error_unscaled']
+        }
 
         val_log_dict = {
-                "val/loss": test_stats['loss'],
-                "val/loss_ce": test_stats['loss_ce'],
-                "val/loss_coords": test_stats['loss_coords'],
-                "val/loss_coords_unscaled": test_stats['loss_coords_unscaled'],
-                "val/cardinality_error": test_stats['cardinality_error_unscaled'],
-                "val_metrics/room_prec": test_stats['room_prec'],
-                "val_metrics/room_rec": test_stats['room_rec'],
-                "val_metrics/corner_prec": test_stats['corner_prec'],
-                "val_metrics/corner_rec": test_stats['corner_rec'],
-                "val_metrics/angles_prec": test_stats['angles_prec'],
-                "val_metrics/angles_rec": test_stats['angles_rec']
-                }
+            "val/loss": test_stats['loss'],
+            "val/loss_ce": test_stats['loss_ce'],
+            "val/loss_coords": test_stats['loss_coords'],
+            "val/loss_coords_unscaled": test_stats['loss_coords_unscaled'],
+            "val/cardinality_error": test_stats['cardinality_error_unscaled'],
+            "val_metrics/room_prec": test_stats['room_prec'],
+            "val_metrics/room_rec": test_stats['room_rec'],
+            "val_metrics/corner_prec": test_stats['corner_prec'],
+            "val_metrics/corner_rec": test_stats['corner_rec'],
+            "val_metrics/angles_prec": test_stats['angles_prec'],
+            "val_metrics/angles_rec": test_stats['angles_rec']
+        }
 
         if args.semantic_classes > 0:
             # need to log additional metrics for semantically-rich floorplans
@@ -311,6 +324,10 @@ def main(args):
         tensorboardwriter.add_scalar('training loss/loss_ce', train_log_dict["train/loss_ce"], epoch)
         tensorboardwriter.add_scalar('training loss/loss_coords', train_log_dict["train/loss_coords"], epoch)
         tensorboardwriter.add_scalar('training loss/loss_raster', train_log_dict["train/loss_raster"], epoch)
+        tensorboardwriter.add_scalar('training loss/tgt_loss_ce', train_log_dict["train/tgt_loss_ce"], epoch)
+        tensorboardwriter.add_scalar('training loss/tgt_loss_coords', train_log_dict["train/tgt_loss_coords"], epoch)
+        tensorboardwriter.add_scalar('training dn vs. matching/dn_loss',
+                                    train_log_dict["train/tgt_loss_ce"] + train_log_dict["train/tgt_loss_coords"], epoch)
         tensorboardwriter.add_scalar('training dn vs. matching/matching_loss',
                                     train_log_dict["train/loss_coords"] + train_log_dict["train/loss_ce"]+train_log_dict["train/loss_raster"], epoch)
         tensorboardwriter.add_scalar('validation loss/loss', val_log_dict["val/loss"], epoch)

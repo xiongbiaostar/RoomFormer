@@ -103,22 +103,70 @@ def pad_gt_polys_to_edges(gt_instances, num_queries_per_poly, device):
                 edge_end = corners[next_index]
                 edges[i] = torch.stack([edge_start, edge_end])
             
+            edges = edges.view(-1).to(device)#[num_points]
+            
+            corner_lengths.append(len(edges))
+
+            edges_pad = torch.zeros(num_queries_per_poly*4, device=device)
+            edges_pad[:len(edges)] = edges #[160]160=40*4
+
+            labels = torch.ones(int(len(edges)/4), dtype=torch.int64).to(device) 
+            labels_pad = torch.zeros(num_queries_per_poly, device=device) #[80]
+            labels_pad[:len(labels)] = labels #[40]
+            room_corners.append(edges_pad)
+            corner_labels.append(labels_pad)
+
+        room_dict = {
+            'coords': torch.stack(room_corners), #[num_polys,160]
+            'labels': torch.stack(corner_labels),#[num_polys,40]
+            'lengths': torch.tensor(corner_lengths, device=device),#[num_polys]
+            'room_labels': gt_inst.gt_classes
+        }
+        room_targets.append(room_dict)
+
+
+    return room_targets
+
+
+
+def get_gt_polys(gt_instances, num_queries_per_poly, device):
+    room_targets = []
+    # padding ground truth on-fly
+    for gt_inst in gt_instances:
+        room_dict = {}
+        room_corners = []
+        corner_labels = []
+        corner_lengths = []
+
+        for i, poly in enumerate(gt_inst.gt_masks.polygons):
+            corners = torch.from_numpy(poly[0])
+            corners = torch.clip(corners, 0, 255) / 255
+            num_corners = len(corners) // 2
+            corners = corners.view(num_corners, 2)
+            edges = torch.zeros((num_corners, 2, 2))
+ 
+            for i in range(num_corners):
+                next_index = (i + 1) % num_corners
+                edge_start = corners[i]
+                edge_end = corners[next_index]
+                edges[i] = torch.stack([edge_start, edge_end])
+            
             edges = edges.view(-1).to(device)
             
             corner_lengths.append(len(edges))
 
-            corners_pad = torch.zeros(num_queries_per_poly*4, device=device)
-            corners_pad[:len(edges)] = edges
+            # corners_pad = torch.zeros(num_queries_per_poly*4, device=device)
+            # corners_pad[:len(edges)] = edges
 
             labels = torch.ones(int(len(edges)/4), dtype=torch.int64).to(device) 
-            labels_pad = torch.zeros(num_queries_per_poly, device=device) #[80]
-            labels_pad[:len(labels)] = labels
-            room_corners.append(corners_pad)
-            corner_labels.append(labels_pad)
+            # labels_pad = torch.zeros(num_queries_per_poly, device=device) #[80]
+            # labels_pad[:len(labels)] = labels
+            room_corners.append(edges)
+            corner_labels.append(labels)
 
         room_dict = {
-            'coords': torch.stack(room_corners), #[num_polys,80]
-            'labels': torch.stack(corner_labels),
+            'coords': torch.cat(room_corners), #[num_edges_of_a_batch*4]
+            'labels': torch.cat(corner_labels), #[num_edges_of_a_batch]
             'lengths': torch.tensor(corner_lengths, device=device),
             'room_labels': gt_inst.gt_classes
         }
@@ -126,4 +174,6 @@ def pad_gt_polys_to_edges(gt_instances, num_queries_per_poly, device):
 
 
     return room_targets
+
+
 

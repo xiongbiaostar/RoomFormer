@@ -7,6 +7,7 @@ from torch import nn
 import math
 
 from util.misc import NestedTensor, nested_tensor_from_tensor_list, interpolate, inverse_sigmoid
+from .dn_components import prepare_for_dn, dn_post_process, compute_dn_loss
 
 from .backbone import build_backbone
 from .matcher import build_matcher
@@ -47,9 +48,13 @@ class RoomFormer(nn.Module):
         
         self.linesegs_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.num_feature_levels = num_feature_levels
+        # dn label enc
+        self.num_classes = num_classes
+        self.hidden_dim = transformer.d_model
+        self.label_enc = nn.Embedding(num_classes + 1, hidden_dim - 1)  # # for indicator
 
         self.query_embed = nn.Embedding(num_queries, 4)
-        self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
+        self.tgt_embed = nn.Embedding(num_queries, hidden_dim-1)
         if num_feature_levels > 1:
             num_backbone_outs = len(backbone.strides)
             input_proj_list = []
@@ -131,7 +136,7 @@ class RoomFormer(nn.Module):
         else:
             self.attention_mask = None
 
-    def forward(self, samples: NestedTensor):
+    def forward(self, samples: NestedTensor,dn_args=None):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensors: batched images, of shape [batch_size x C x H x W]
                - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
@@ -174,13 +179,28 @@ class RoomFormer(nn.Module):
 
         query_embeds = self.query_embed.weight
         tgt_embeds = self.tgt_embed.weight
+        # --------------------------------------
+        # preprare for dn
+
+        input_query_label, input_query_polys, attn_mask, mask_dict = \
+            prepare_for_dn(dn_args, tgt_embeds, query_embeds, src.size(0), self.training, self.num_queries,
+                           self.num_classes,
+                           self.hidden_dim, self.label_enc)
+        # print("preprare for dn",input_query_label.shape,input_query_polys.shape,query_embeds.shape,tgt_embeds.shape)
         
-        hs, init_reference, inter_references, inter_classes = self.transformer(srcs, masks, pos, query_embeds, tgt_embeds, self.attention_mask)
+        # --------------------------------------
+        
+        hs, init_reference, inter_references, inter_classes , enc_outputs_class, enc_outputs_coord_unact = self.transformer(srcs, masks, pos, input_query_polys, input_query_label, attn_mask)
 
         num_layer = hs.shape[0]
-        outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
-        outputs_coord = inter_references.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 4)
-        
+        # outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
+        # outputs_coord = inter_references.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 4)
+        # --------------------------------------
+        # dn post process
+        outputs_class,outputs_coord = dn_post_process(inter_classes,inter_references,mask_dict)
+        outputs_class = outputs_class.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
+        outputs_coord = outputs_coord.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 2)
+        # --------------------------------------
         out = {'pred_logits': outputs_class[-1], 'pred_coords': outputs_coord[-1]}
 
         # hack implementation of room label prediction, not compatible with auxiliary loss
@@ -191,7 +211,7 @@ class RoomFormer(nn.Module):
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
 
-        return out
+        return out,mask_dict
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord):
@@ -317,7 +337,7 @@ class SetCriterion(nn.Module):
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, **kwargs)
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, mask_dict=None):
         """ This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
@@ -356,7 +376,12 @@ class SetCriterion(nn.Module):
                 l_dict = self.get_loss(loss, enc_outputs, targets, indices)
                 l_dict = {k + f'_enc': v for k, v in l_dict.items()}
                 losses.update(l_dict)
-
+        # dn loss computation
+        aux_num = 0
+        if 'aux_outputs' in outputs:
+            aux_num = len(outputs['aux_outputs'])
+        dn_losses = compute_dn_loss(mask_dict, self.training, aux_num)
+        losses.update(dn_losses)
         return losses
 
 
@@ -404,6 +429,10 @@ def build(args, train=True):
                     'loss_coords': args.coords_loss_coef,
                     'loss_raster': args.raster_loss_coef
                     }
+    # dn loss
+
+    weight_dict['tgt_loss_ce'] = args.cls_loss_coef
+    weight_dict['tgt_loss_coords'] = args.coords_loss_coef
     weight_dict['loss_dir'] = 1
 
     enc_weight_dict = {}

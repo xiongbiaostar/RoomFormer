@@ -32,11 +32,13 @@ class DeformableTransformer(nn.Module):
     def __init__(self, d_model=256, nhead=8,
                  num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", poly_refine=True, return_intermediate_dec=False, aux_loss=False,
-                 num_feature_levels=4, dec_n_points=4, enc_n_points=4, query_pos_type="none",two_stage_num_proposals=300,use_encoder_proposal=False):
+                 num_feature_levels=4, dec_n_points=4, enc_n_points=4, query_pos_type="none",two_stage_num_proposals=300,use_encoder_proposal=False, num_queries=800):
         super().__init__()
 
         self.d_model = d_model
         self.nhead = nhead
+        self.num_queries = num_queries
+
 
         encoder_layer = DeformableTransformerEncoderLayer(d_model, dim_feedforward,
                                                           dropout, activation,
@@ -51,7 +53,7 @@ class DeformableTransformer(nn.Module):
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
 
         if query_pos_type == 'sine':
-            self.decoder.pos_trans = MLP(2 * d_model, d_model, d_model, 2)#nn.Linear(d_model, d_model)
+            self.decoder.pos_trans = nn.Linear(d_model, d_model)
             self.decoder.pos_trans_norm = nn.LayerNorm(d_model)
 
         #---------暂时不知道什么用处------------------------------------
@@ -186,10 +188,10 @@ class DeformableTransformer(nn.Module):
         #-------------------------------------------  
         else:
             
-            query_embed = query_embed.unsqueeze(0).expand(bs, -1, -1) #[bs,800,4]
-            tgt = tgt.unsqueeze(0).expand(bs, -1, -1) #[bs,800,256]
+            # query_embed = query_embed.unsqueeze(0).expand(bs, -1, -1) #[bs,800,4]
+            # tgt = tgt.unsqueeze(0).expand(bs, -1, -1) #[bs,800,256]
             reference_points = query_embed.sigmoid() #[bs,800,2]
-            init_reference_out = reference_points
+        init_reference_out = reference_points
 
         # decoder
         hs, inter_references, inter_classes = self.decoder(tgt, reference_points, memory, src_flatten,
@@ -435,13 +437,14 @@ def build_deforamble_transformer(args):
         num_decoder_layers=args.dec_layers,
         dim_feedforward=args.dim_feedforward,
         dropout=args.dropout,
-        activation="relu",
+        activation="gelu",
         poly_refine=args.with_poly_refine,
         return_intermediate_dec=True,
         aux_loss=args.aux_loss,
         num_feature_levels=args.num_feature_levels,
         dec_n_points=args.dec_n_points,
         enc_n_points=args.enc_n_points,
-        query_pos_type=args.query_pos_type)
+        query_pos_type=args.query_pos_type,
+        num_queries=args.num_queries)
 
 

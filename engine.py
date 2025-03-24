@@ -20,7 +20,7 @@ from s3d_floorplan_eval.DataRW.S3DRW import S3DRW
 from s3d_floorplan_eval.DataRW.wrong_annotatios import wrong_s3d_annotations_list
 
 from scenecad_eval.Evaluator import Evaluator_SceneCAD
-from util.poly_ops import pad_gt_polys,pad_gt_polys_to_edges
+from util.poly_ops import pad_gt_polys,pad_gt_polys_to_edges,get_gt_polys
 from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan
 
 options = MCSSOptions()
@@ -28,7 +28,7 @@ opts = options.parse()
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0):
+                    device: torch.device, epoch: int, max_norm: float = 0, args = None,num_epochs=650):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -41,9 +41,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         samples = [x["image"].to(device) for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys_to_edges(gt_instances, model.num_queries_per_poly, device)
+        #未zero-padding的真值
+        targets = get_gt_polys(gt_instances, model.num_queries_per_poly, device)
 
-        outputs = model(samples)
-        loss_dict = criterion(outputs, room_targets)
+        dn_args = (targets, args.scalar, args.label_noise_scale, args.poly_noise_scale)
+
+        outputs,mask_dict = model(samples,dn_args)
+        loss_dict = criterion(outputs, room_targets,mask_dict)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
@@ -95,7 +99,8 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         outputs = model(samples)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
-
+        weight_dict['loss_coords']=5
+        weight_dict['tgt_loss_coords'] = 5
 
         bs = outputs['pred_logits'].shape[0]
         pred_logits = outputs['pred_logits']
