@@ -190,7 +190,7 @@ class RoomFormer(nn.Module):
         
         # --------------------------------------
         
-        hs, init_reference, inter_references, inter_classes , enc_outputs_class, enc_outputs_coord_unact = self.transformer(srcs, masks, pos, input_query_polys, input_query_label, attn_mask)
+        hs, init_reference, inter_references, inter_classes  = self.transformer(srcs, masks, pos, input_query_polys, input_query_label, attn_mask)
 
         num_layer = hs.shape[0]
         # outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
@@ -199,7 +199,7 @@ class RoomFormer(nn.Module):
         # dn post process
         outputs_class,outputs_coord = dn_post_process(inter_classes,inter_references,mask_dict)
         outputs_class = outputs_class.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
-        outputs_coord = outputs_coord.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 2)
+        outputs_coord = outputs_coord.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly, 4)
         # --------------------------------------
         out = {'pred_logits': outputs_class[-1], 'pred_coords': outputs_coord[-1]}
 

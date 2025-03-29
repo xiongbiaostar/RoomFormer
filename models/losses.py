@@ -22,17 +22,17 @@ def dn_L1_loss(src_polys, target_polys, target_len):
     target_polys = target_polys.float()
     # print("dnl1loss", target_len,target_polys.shape)
     for length in target_len:
-        tgt_poly_single = target_polys[index:index+int(length/2)]
+        tgt_poly_single = target_polys[index:index+int(length/4)]
         # print("dnl1loss",length,tgt_poly_single)
         tgt_poly_single = tgt_poly_single.view(-1)
         # print("这里",tgt_poly_single.shape)
         all_polys = get_all_order_corners(tgt_poly_single)
-        src_poly_single = src_polys[index:index+int(length/2)]
+        src_poly_single = src_polys[index:index+int(length/4)]
         src_poly_single=src_poly_single.reshape(-1)
         src_poly_single=src_poly_single.unsqueeze(0)
 
         total_loss += torch.cdist(src_poly_single, all_polys , p=1).min()
-        index += int(length/2)
+        index += int(length/4)
     # print("dn",total_loss,target_len.sum())
     total_loss = total_loss/target_len.sum()
     return total_loss

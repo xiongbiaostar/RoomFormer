@@ -53,7 +53,8 @@ class DeformableTransformer(nn.Module):
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
 
         if query_pos_type == 'sine':
-            self.decoder.pos_trans = nn.Linear(d_model, d_model)
+            self.decoder.pos_trans = MLP(2 * d_model, d_model, d_model, 2)#nn.Linear(d_model, d_model)
+#nn.Linear(d_model, d_model)
             self.decoder.pos_trans_norm = nn.LayerNorm(d_model)
 
         #---------暂时不知道什么用处------------------------------------

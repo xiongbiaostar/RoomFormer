@@ -527,6 +527,10 @@ class Evaluator():
         else:
             angles_metric_prec = 0
         angles_metric_rec = sum(angles_metric) / float(gt_corners_n)
+        print("预测有效房间/总预测房间/真值房间/",sum(room_metric),float(len(pred_polys)),float(len(gt_polys)))
+        print("预测有效坐标/总预测坐标/真值坐标/",sum(corner_metric),float(pred_corners_n),float(gt_corners_n))
+        print("预测有效角度/总预测角度/真值角度/",sum(angles_metric),float(pred_corners_n),float(gt_corners_n))
+
 
         # sanity check
         assert room_metric_prec <= 1

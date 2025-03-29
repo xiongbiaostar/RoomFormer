@@ -71,21 +71,21 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
-    parser.add_argument('--dataset_root', default='data/stru3d', type=str)
+    parser.add_argument('--dataset_root', default='/home/lyy/edge/data/stru3d', type=str)
     parser.add_argument('--eval_set', default='test', type=str)
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--checkpoint', default='/home/lyy/lineformer/output/2025-01-16-14-59-47_train_stru3d/checkpoint0399.pth', help='resume from checkpoint')
+    parser.add_argument('--seed', default=42, type=int)#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
+    parser.add_argument('--checkpoint', default='/home/lyy/edge/output/2025-03-29-10-23-36_edge_dn/checkpoint0619.pth', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
     parser.add_argument('--output_dir', default='eval_stru3d',
                         help='path where to save result')
 
     # visualization options
     parser.add_argument('--plot_pred', default=True, type=bool, help="plot predicted floorplan")
-    parser.add_argument('--plot_density', default=True, type=bool, help="plot predicited room polygons overlaid on the density map")
-    parser.add_argument('--plot_gt', default=True, type=bool, help="plot ground truth floorplan")
+    parser.add_argument('--plot_density', default=False, type=bool, help="plot predicited room polygons overlaid on the density map")
+    parser.add_argument('--plot_gt', default=False, type=bool, help="plot ground truth floorplan")
 
 
     return parser

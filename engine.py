@@ -20,9 +20,9 @@ from s3d_floorplan_eval.DataRW.S3DRW import S3DRW
 from s3d_floorplan_eval.DataRW.wrong_annotatios import wrong_s3d_annotations_list
 
 from scenecad_eval.Evaluator import Evaluator_SceneCAD
-from util.poly_ops import pad_gt_polys,pad_gt_polys_to_edges,get_gt_polys
-from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan
-
+from util.poly_ops import pad_gt_polys,pad_gt_polys_to_edges,get_gt_polys,get_polygon_vertices_matrix
+from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan,plot_room_map_with_edges,plot_floorplan_with_edges
+from util.edge_utils import remove_short_edges,get_corners_from_edges,remove_duplicate_corners,merge_points,refine_rooms,remove_multi_polygon
 options = MCSSOptions()
 opts = options.parse()
 
@@ -96,7 +96,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         room_targets = pad_gt_polys_to_edges(gt_instances, model.num_queries_per_poly, device)
 
 
-        outputs = model(samples)
+        outputs,_ = model(samples)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
         weight_dict['loss_coords']=5
@@ -254,7 +254,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     plot_semantic_rich_floorplan(gt_sem_rich, gt_sem_rich_path, prec=1, rec=1) 
 
 
-        outputs = model(samples)
+        outputs,_ = model(samples)
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
         fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners
@@ -282,6 +282,8 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
             fg_mask_per_scene = fg_mask[i]
             pred_corners_per_scene = pred_corners[i]
             room_polys = []
+            room_edges = []
+            room_edge_lengths=[]
 
             if semantic_rich:
                 room_types = []
@@ -296,23 +298,65 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
                 if len(valid_corners_per_room)>0:
                     corners = (valid_corners_per_room * 255).cpu().numpy()
-                    corners = corners[:,:2]
+                    corners = remove_short_edges(corners)
+                    # print("移除短边",corners.shape)
+                    edges = corners
+
+                    #print("这",corners.shape)
+                    corners = get_corners_from_edges(corners)#get_polygon_vertices_matrix(edges)
+                    # corners = remove_duplicate_corners(corners)
                     corners = np.around(corners).astype(np.int32)
+                    corners = merge_points(corners,2)#2.5
+                    # edges = np.around(edges).astype(np.int32)
 
                     if not semantic_rich:
                         # only regular rooms
                         if len(corners)>=4 and Polygon(corners).area >= 100:
                                 room_polys.append(corners)
+                                room_edges.append(edges)
+                                # length = np.sqrt((edges[:, 2] - edges[:, 0])**2 + (edges[:, 3] - edges[:, 1])**2)
+
                     else:
                         # regular rooms
                         if pred_room_label_per_scene[j] not in [16,17]:
                             if len(corners)>=4 and Polygon(corners).area >= 100:
                                 room_polys.append(corners)
+
                                 room_types.append(pred_room_label_per_scene[j])
                         # window / door
                         elif len(corners)==2:
                             window_doors.append(corners)
                             window_doors_types.append(pred_room_label_per_scene[j])
+            if scene_ids[0] in [3407]:
+                print(scene_ids,room_edges,room_polys)
+            overlap=False
+            shapely_polygons = []
+            for np_array in room_polys:
+                # 1. 转换为元组列表
+                points = [tuple(point) for point in np_array]
+                
+                # 2. 闭合多边形（如果未闭合）
+                if len(points) > 0 and points[0] != points[-1]:
+                    points.append(points[0])
+                
+                # 3. 创建Shapely Polygon对象
+                shapely_poly = Polygon(points)
+                shapely_polygons.append(shapely_poly)
+            try:
+                # shapely_polygons = remove_multi_polygon(shapely_polygons)
+                polygon_list,overlap = refine_rooms(shapely_polygons,overlap)
+                # polygon_list = remove_multi_polygon(polygon_list)
+                room_ = []
+                for polygon in polygon_list:
+                    try:
+                        room = np.array(polygon.exterior.coords, dtype=np.int32)[:-1]
+                        room_.append(room)
+                    except:
+                        room_.append(room_polys)
+
+                room_polys=room_
+            except:
+                room_polys=room_polys
 
 
             if dataset_name == 'stru3d':
@@ -358,7 +402,21 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     room_polys = [np.array(r) for r in room_polys]
                     floorplan_map = plot_floorplan_with_regions(room_polys, scale=1000)
                     cv2.imwrite(os.path.join(output_dir, '{}_pred_floorplan.png'.format(scene_ids[i])), floorplan_map)
+#----------------把边绘制出来---------------------------------------
+            room_edges = [np.array(r) for r in room_edges]
+            edge_map = plot_floorplan_with_edges(room_edges, scale=1000)
+            cv2.imwrite(os.path.join(output_dir, '{}_pred_edge.png'.format(scene_ids[i])), edge_map)
+            density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
+            density_map = np.repeat(density_map, 3, axis=2)
+            pred_room_map = np.zeros([256, 256, 3])
 
+            for room_poly in room_edges:
+                pred_room_map = plot_room_map_with_edges(room_poly, pred_room_map)
+
+            # plot predicted polygon overlaid on the density map
+            pred_room_map = np.clip(pred_room_map + density_map, 0, 255)
+            cv2.imwrite(os.path.join(output_dir, '{}_pred_edge_on_density.png'.format(scene_ids[i])), pred_room_map)
+#----------------把边绘制出来---------------------------------------
             if plot_density:
                 density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
                 density_map = np.repeat(density_map, 3, axis=2)

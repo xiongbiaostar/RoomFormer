@@ -28,7 +28,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=10, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=650, type=int)
-    parser.add_argument('--lr_drop', default=[520], type=list)
+    parser.add_argument('--lr_drop', default=[520], type=list)#520
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
 
@@ -89,9 +89,9 @@ def get_args_parser():
                         help="L1 coords coefficient in the matching cost")
 
     # loss coefficients
-    parser.add_argument('--cls_loss_coef', default=2, type=float)
+    parser.add_argument('--cls_loss_coef', default=1, type=float)
     parser.add_argument('--room_cls_loss_coef', default=0.2, type=float)
-    parser.add_argument('--coords_loss_coef', default=5, type=float)
+    parser.add_argument('--coords_loss_coef', default=6, type=float)
     parser.add_argument('--raster_loss_coef', default=1, type=float)
 
     # dataset parameters
@@ -103,11 +103,11 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/home/lyy/edge/output/2025-03-28-11-44-46_edge_dn/checkpoint0399.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--job_name', default='edge', type=str)
+    parser.add_argument('--job_name', default='edge_dn', type=str)
     parser.add_argument('--use_dn', action="store_true",
                         help="use denoising training.")
     parser.add_argument('--scalar', default=5, type=int,
@@ -220,18 +220,23 @@ def main(args):
             for pg, pg_old in zip(optimizer.param_groups, p_groups):
                 pg['lr'] = pg_old['lr']
                 pg['initial_lr'] = pg_old['initial_lr']
-            print(optimizer.param_groups)
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # print(optimizer.param_groups)
+            # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             # todo: this is a hack for doing experiment that resume from checkpoint and also modify lr scheduler (e.g., decrease lr in advance).
-            args.override_resumed_lr_drop = True
+            args.override_resumed_lr_drop = False
+            
             if args.override_resumed_lr_drop:
                 print('Warning: (hack) args.override_resumed_lr_drop is set to True, so args.lr_drop would override lr_drop in resumed lr_scheduler.')
+                print("k看看",lr_scheduler.milestones )
                 lr_scheduler.step_size = args.lr_drop
+                print("k看看",lr_scheduler.milestones)
+
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
-            lr_scheduler.step(lr_scheduler.last_epoch)
-            # for param_group in optimizer.param_groups:
-            #     param_group['lr'] = param_group['lr'] * 10
+            # lr_scheduler.step(lr_scheduler.last_epoch)
             args.start_epoch = checkpoint['epoch'] + 1
+            lr_scheduler.last_epoch = args.start_epoch-1
+            lr_scheduler.step(lr_scheduler.last_epoch )
+            print("不是",args.start_epoch,lr_scheduler.last_epoch,lr_scheduler.milestones)
         # check the resumed model
         test_stats = evaluate(
             model, criterion, args.dataset_name, data_loader_val, device

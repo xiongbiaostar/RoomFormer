@@ -36,6 +36,18 @@ colors_12 = [
     "#808000",
     "#ffd7b4"
 ]
+colors_lines_from_red_to_green = [
+    (0, 0, 255),
+    (0, 56, 255),
+    (0, 113, 255),
+    (0, 170, 255),
+    (0, 226, 255),
+    (0, 255, 226),
+    (0, 255, 170),
+    (0, 255, 113),
+    (0, 255, 56),
+    (0, 255, 0)
+]
 
 semantics_cmap = {
     0: '#e6194b',
@@ -89,6 +101,64 @@ RED = '#ff3333'
 BLACK = '#000000'
 
 
+def plot_floorplan_with_edges(regions, corners=None, edges=None, scale=256):
+    """Draw floorplan map where different colors indicate different rooms
+    """
+    colors = colors_12
+
+    regions = [(region * scale / 256).round().astype(np.int) for region in regions]
+
+    # define the color map
+    room_colors = [colors[i] for i in range(len(regions))]
+
+    colorMap = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in room_colors]
+    colorMap = np.asarray(colorMap)
+    if len(regions) > 0:
+        colorMap = np.concatenate([np.full(shape=(1, 3), fill_value=0), colorMap], axis=0).astype(
+            np.uint8)
+    else:
+        colorMap = np.concatenate([np.full(shape=(1, 3), fill_value=0)], axis=0).astype(
+            np.uint8)
+    # when using opencv, we need to flip, from RGB to BGR
+    colorMap = colorMap[:, ::-1]
+
+    alpha_channels = np.zeros(colorMap.shape[0], dtype=np.uint8)
+    alpha_channels[1:len(regions) + 1] = 150
+
+    colorMap = np.concatenate([colorMap, np.expand_dims(alpha_channels, axis=-1)], axis=-1)
+
+    room_map = np.zeros([scale, scale]).astype(np.int32)
+    # sort regions
+    # if len(regions) > 1:
+    #     avg_corner = [region.mean(axis=0) for region in regions]
+    #     ind = np.argsort(np.square(np.array(avg_corner)).sum(axis=1), axis=0)
+    #     regions = np.array(regions)[ind]
+
+    # for idx, polygon in enumerate(regions):
+    #     cv2.fillPoly(room_map, [polygon], color=idx + 1)
+
+    image = colorMap[room_map.reshape(-1)].reshape((scale, scale, 4)) 
+
+    pointColor = (0,0,0,255)
+    lineColor = (0,0,0,255)
+
+    for region in regions:
+        for i, point in enumerate(region):
+            # if i == len(region)-1:
+            #     cv2.line(image, tuple(point[:2]), tuple(region[0]), color=lineColor, thickness=5)
+            #     cv2.line(image, tuple(point[:2]), tuple(region[0]), color=lineColor, thickness=5)
+            # else: 
+            blue,green,red =  colors_lines_from_red_to_green[i%10]  
+            cv2.line(image, tuple(point[:2]), tuple(point[2:]), color=(int(blue), int(green), int(red),255), thickness=2)
+
+    for region in regions:
+        for i, point in enumerate(region):
+            cv2.circle(image, tuple(point[:2]), color=pointColor, radius=6, thickness=-1)
+            cv2.circle(image, tuple(point[:2]), color=(255, 255, 255, 0), radius=3, thickness=-1)
+            cv2.circle(image, tuple(point[2:]), color=pointColor, radius=6, thickness=-1)
+            cv2.circle(image, tuple(point[2:]), color=(255, 255, 255, 0), radius=3, thickness=-1)
+
+    return image
 def plot_floorplan_with_regions(regions, corners=None, edges=None, scale=256):
     """Draw floorplan map where different colors indicate different rooms
     """
@@ -144,7 +214,6 @@ def plot_floorplan_with_regions(regions, corners=None, edges=None, scale=256):
 
     return image
 
-
 def plot_score_map(corner_map, scores):
     """Draw score map overlaid on the density map
     """
@@ -165,6 +234,20 @@ def plot_score_map(corner_map, scores):
 
     return score_map
 
+def plot_room_map_with_edges(preds, room_map, im_size=256):
+    """Draw room polygons overlaid on the density map
+    """
+    for i, corner in enumerate(preds):
+        # if i == len(preds)-1:
+        #     cv2.line(room_map, (round(corner[0]), round(corner[1])), (round(preds[0][0]), round(preds[0][1])), (252, 252, 0), 2)
+        # else:
+        cv2.line(room_map, (round(corner[0]), round(corner[1])), (round(corner[2]), round(corner[3])), (252, 252, 0), 2)
+        cv2.circle(room_map, (round(corner[0]), round(corner[1])), 2, (0, 0, 255), 2)
+        cv2.circle(room_map, (round(corner[2]), round(corner[3])), 2, (0, 0, 255), 2)
+        cv2.putText(room_map, str(i), (round(corner[0]), round(corner[1])), cv2.FONT_HERSHEY_SIMPLEX, 
+                   0.4, (0, 255, 0), 1, cv2.LINE_AA)
+        
+    return room_map
 
 def plot_room_map(preds, room_map, im_size=256):
     """Draw room polygons overlaid on the density map
