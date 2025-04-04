@@ -298,7 +298,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
                 if len(valid_corners_per_room)>0:
                     corners = (valid_corners_per_room * 255).cpu().numpy()
-                    # corners = remove_short_edges(corners)
+                    corners = remove_short_edges(corners)
                     # print("移除短边",corners.shape)
                     edges = corners
 
@@ -306,7 +306,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     corners = get_corners_from_edges(corners)#get_polygon_vertices_matrix(edges)
                     # corners = remove_duplicate_corners(corners)
                     corners = np.around(corners).astype(np.int32)
-                    # corners = merge_points(corners,2.5)#2.5
+                    corners = merge_points(corners,2.5)#2.5
                     # edges = np.around(edges).astype(np.int32)
 
                     if not semantic_rich:
@@ -360,11 +360,11 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
             except:
                 room_polys=room_polys
             #--------------存为npy文件-------------
-            # save_path = os.path.join("best_npy", f"0{scene_ids[0]}.npy")
+            save_path = os.path.join("best_npy_swint+edge+dn", f"0{scene_ids[0]}.npy")
  
-            # # 确保目录存在（如果不存在则自动创建）
-            # os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            # np.save(save_path, room_polys)
+            # 确保目录存在（如果不存在则自动创建）
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            np.save(save_path, room_polys)
             #---------------------------------------------
 
             if dataset_name == 'stru3d':
