@@ -14,10 +14,11 @@ from torch import nn
 from torchvision.models._utils import IntermediateLayerGetter
 from typing import Dict, List
 
-from util.misc import NestedTensor
-
+from .swin_transformer import build_swin_transformer
+from util.misc import NestedTensor, clean_state_dict
+import os
 from .position_encoding import build_position_encoding
-
+from transformers import AutoModelForImageClassification, AutoFeatureExtractor
 
 class FrozenBatchNorm2d(torch.nn.Module):
     """
@@ -94,9 +95,10 @@ class Backbone(BackboneBase):
                  return_interm_layers: bool,
                  dilation: bool):
         norm_layer = FrozenBatchNorm2d
-        backbone = getattr(torchvision.models, name)(
-            replace_stride_with_dilation=[False, False, dilation],
-            pretrained=True, norm_layer=norm_layer)
+        if name in ['resnet18', 'resnet34', 'resnet50', 'resnet101']:
+            backbone = getattr(torchvision.models, name)(
+                replace_stride_with_dilation=[False, False, dilation],
+                pretrained=True, norm_layer=norm_layer)
         # modify the first layer to compatible with single channel input
         backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         assert name not in ('resnet18', 'resnet34'), "number of channels are hard coded"
@@ -129,6 +131,56 @@ def build_backbone(args):
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
     return_interm_layers = args.num_feature_levels > 1
-    backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
+    if args.backbone in ['resnet50', 'resnet101']:
+        backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
+
+    elif args.backbone in ['swin_T_224_1k', 'swin_B_224_22k', 'swin_B_384_22k', 'swin_L_224_22k', 'swin_L_384_22k']:
+        pretrain_img_size = int(args.backbone.split('_')[-2])
+        return_interm_indices = [1,2,3]
+        use_checkpoint = getattr(args, 'use_checkpoint', False)
+        train_backbone = args.lr_backbone > 0
+        backbone_freeze_keywords = None
+        backbone = build_swin_transformer(args.backbone, \
+                    pretrain_img_size=256, \
+                    out_indices=tuple(return_interm_indices), \
+                dilation=args.dilation, use_checkpoint=use_checkpoint)
+        #-----------------------没问题，只要三个数即可。无所谓数值，只需要确保返回的strides的长度和取的特征图个数相等即可------------------------
+        backbone.strides = [8, 16, 32]
+        if args.dilation:
+            backbone.strides[-1] = backbone.strides[-1] // 2
+
+        #------------------------------------------------------------
+        # freeze some layers
+        if backbone_freeze_keywords is not None:
+            for name, parameter in backbone.named_parameters():
+                for keyword in backbone_freeze_keywords:
+                    if keyword in name:
+                        parameter.requires_grad_(False)
+                        break
+        if use_checkpoint:
+            pretrained_dir = "/home/lyy/edge/pretrained"
+            PTDICT = {
+                'swin_T_224_1k': 'swin_tiny_patch4_window7_224.pth',
+                'swin_B_384_22k': 'swin_base_patch4_window12_384.pth',
+                'swin_L_384_22k': 'swin_large_patch4_window12_384_22k.pth',
+            }
+            pretrainedpath = os.path.join(pretrained_dir, PTDICT[args.backbone])
+            checkpoint = torch.load(pretrainedpath, map_location='cpu')['model']
+            first_conv_weight = checkpoint['patch_embed.proj.weight']
+            # 取均值压缩通道（3→1）
+            new_conv_weight = first_conv_weight.mean(dim=1, keepdim=True)
+            checkpoint['patch_embed.proj.weight'] = new_conv_weight
+            from collections import OrderedDict
+            def key_select_function(keyname):
+                if 'head' in keyname:
+                    return False
+                if args.dilation and 'layers.3' in keyname:
+                    return False
+                return True
+            _tmp_st = OrderedDict({k:v for k, v in clean_state_dict(checkpoint).items() if key_select_function(k)})
+            _tmp_st_output = backbone.load_state_dict(_tmp_st, strict=False)
+            print("checkpoint",checkpoint,str(_tmp_st_output))
+        bb_num_channels = backbone.num_features[4 - len(return_interm_indices):]
+        backbone.num_channels = bb_num_channels 
     model = Joiner(backbone, position_embedding)
     return model

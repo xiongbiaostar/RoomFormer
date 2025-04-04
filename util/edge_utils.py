@@ -3,7 +3,40 @@ import cv2
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.geometry import LineString
 from shapely.ops import unary_union
+def remove_rooms_with_iou(polygon_list):
+    # Compute the IOU between each pair
+    room_map_list = []
+    for room_ind, poly in enumerate(polygon_list):
+        room_map = np.zeros((256, 256))
+        cv2.fillPoly(room_map, [np.array(poly.exterior.coords, dtype=np.int32)[:-1]], color=1.)
+        room_map_list.append(room_map)
 
+    access_mat = np.zeros((len(polygon_list), len(polygon_list)))
+    remove_indices = []
+    for idx0, polygon0 in enumerate(polygon_list):
+        for idx1, polygon1 in enumerate(polygon_list):
+            if idx0 == idx1 or access_mat[idx0][idx1] == 1 or access_mat[idx1][idx0] == 1:
+                continue
+            # compute the iou bewteen polygon0 and polygon1
+            intersection = ((room_map_list[idx0] + room_map_list[idx1]) == 2)
+            union = ((room_map_list[idx0] + room_map_list[idx1]) >= 1)
+            iou = np.sum(intersection) / (np.sum(union) + 1)
+            if iou > 0.4:
+                print("移除iou")
+                remove_indices.append([idx0, idx1])
+            # print(f'idx_0: {idx0}, idx1: {idx1}, iou: {iou}')
+            access_mat[idx0][idx1] = 1
+            access_mat[idx1][idx0] = 1
+    
+    for remove_index in remove_indices:
+        idx0, idx1 = remove_index[0], remove_index[1]
+        polygon0, polygon1 = polygon_list[idx0], polygon_list[1]
+        poly_area0, poly_area1 = polygon0.area, polygon1.area
+        if poly_area0 > poly_area1:
+            del polygon_list[idx1]
+        else:
+            del polygon_list[idx0]
+    return polygon_list
 def refine_rooms(polygon_list,overlap):
     access_mat = np.zeros((len(polygon_list), len(polygon_list)))
     for idx0, polygon0 in enumerate(polygon_list):

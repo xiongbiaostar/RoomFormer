@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--sgd', action='store_true')
 
     # backbone
-    parser.add_argument('--backbone', default='resnet50', type=str,
+    parser.add_argument('--backbone', default='swin_L_384_22k', type=str,#resnet50swin_L_384_22k
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -83,9 +83,9 @@ def get_args_parser():
                         help="Disables auxiliary decoding losses (loss at each layer)")
 
     # matcher
-    parser.add_argument('--set_cost_class', default=2, type=float,
+    parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
-    parser.add_argument('--set_cost_coords', default=5, type=float,
+    parser.add_argument('--set_cost_coords', default=6, type=float,
                         help="L1 coords coefficient in the matching cost")
 
     # loss coefficients
@@ -103,7 +103,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/home/lyy/edge/output/2025-03-28-11-44-46_edge_dn/checkpoint0399.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/home/lyy/edge/output/2025-04-02-12-50-10_edge_dn/checkpoint.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
@@ -116,6 +116,11 @@ def get_args_parser():
                         help="label noise ratio to flip")
     parser.add_argument('--poly_noise_scale', default=0.4, type=float,
                         help="poly noise scale to shift and scale")
+    
+
+    #swin_transformer
+    # parser.add_argument('--dilation', default=False, type=bool)
+    parser.add_argument('--use_checkpoint', default=True, type=bool)
     return parser
 
 
@@ -251,8 +256,8 @@ def main(args):
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 20 epochs
-            if epoch < 400:
-                if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
+            if epoch < 500:
+                if (epoch + 1) in args.lr_drop or (epoch + 1) % 50 == 0:
                     checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             else :
                 if (epoch + 1) in args.lr_drop or (epoch + 1) % 10 == 0:

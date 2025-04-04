@@ -60,6 +60,7 @@ class RoomFormer(nn.Module):
             input_proj_list = []
             for _ in range(num_backbone_outs):
                 in_channels = backbone.num_channels[_]
+                
                 input_proj_list.append(nn.Sequential(
                     nn.Conv2d(in_channels, hidden_dim, kernel_size=1),
                     nn.GroupNorm(32, hidden_dim),

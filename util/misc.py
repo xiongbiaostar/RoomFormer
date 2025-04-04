@@ -15,7 +15,7 @@ Mostly copy-paste from torchvision references.
 import os
 import subprocess
 import time
-from collections import defaultdict, deque
+from collections import defaultdict, deque, OrderedDict
 import datetime
 import getpass
 import pickle
@@ -537,3 +537,12 @@ def setup_wandb():
     else:
         print("wandb key already set")
     os.system("export WANDB_API_KEY=$(cat \"" + wandb_key_path + "\")")
+
+
+def clean_state_dict(state_dict):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if k[:7] == 'module.':
+            k = k[7:]  # remove `module.`
+        new_state_dict[k] = v
+    return new_state_dict
