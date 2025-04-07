@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--sgd', action='store_true')
 
     # backbone
-    parser.add_argument('--backbone', default='swin_L_384_22k', type=str,#resnet50swin_L_384_22k
+    parser.add_argument('--backbone', default='swin_L_384_22k', type=str,#resnet50swinv2_L_192_22k
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -89,7 +89,7 @@ def get_args_parser():
                         help="L1 coords coefficient in the matching cost")
 
     # loss coefficients
-    parser.add_argument('--cls_loss_coef', default=1, type=float)
+    parser.add_argument('--cls_loss_coef', default=0.6, type=float)
     parser.add_argument('--room_cls_loss_coef', default=0.2, type=float)
     parser.add_argument('--coords_loss_coef', default=6, type=float)
     parser.add_argument('--raster_loss_coef', default=1, type=float)
@@ -103,11 +103,11 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/home/lyy/edge/output/2025-04-02-12-50-10_edge_dn/checkpoint.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--job_name', default='edge_dn', type=str)
+    parser.add_argument('--job_name', default='edge_dn_swinv1ceweight0.6_coord6', type=str)
     parser.add_argument('--use_dn', action="store_true",
                         help="use denoising training.")
     parser.add_argument('--scalar', default=5, type=int,

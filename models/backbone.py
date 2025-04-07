@@ -15,6 +15,7 @@ from torchvision.models._utils import IntermediateLayerGetter
 from typing import Dict, List
 
 from .swin_transformer import build_swin_transformer
+from .swin_transformerv2 import build_swin_transformerV2
 from util.misc import NestedTensor, clean_state_dict
 import os
 from .position_encoding import build_position_encoding
@@ -180,6 +181,52 @@ def build_backbone(args):
             _tmp_st = OrderedDict({k:v for k, v in clean_state_dict(checkpoint).items() if key_select_function(k)})
             _tmp_st_output = backbone.load_state_dict(_tmp_st, strict=False)
             print("checkpoint",checkpoint,str(_tmp_st_output))
+        bb_num_channels = backbone.num_features[4 - len(return_interm_indices):]
+        backbone.num_channels = bb_num_channels 
+    elif args.backbone in ['swinv2_L_192_22k']:
+        pretrain_img_size = int(args.backbone.split('_')[-2])
+        return_interm_indices = [1,2,3]
+        use_checkpoint = getattr(args, 'use_checkpoint', False)
+        train_backbone = args.lr_backbone > 0
+        backbone_freeze_keywords = None
+        backbone = build_swin_transformerV2(args.backbone, \
+                    pretrain_img_size=192, \
+                    out_indices=tuple(return_interm_indices), \
+                dilation=args.dilation, use_checkpoint=use_checkpoint)
+        #-----------------------没问题，只要三个数即可。无所谓数值，只需要确保返回的strides的长度和取的特征图个数相等即可------------------------
+        backbone.strides = [8, 16, 32]
+        if args.dilation:
+            backbone.strides[-1] = backbone.strides[-1] // 2
+
+        #------------------------------------------------------------
+        # freeze some layers
+        if backbone_freeze_keywords is not None:
+            for name, parameter in backbone.named_parameters():
+                for keyword in backbone_freeze_keywords:
+                    if keyword in name:
+                        parameter.requires_grad_(False)
+                        break
+        if use_checkpoint:
+            pretrained_dir = "/home/lyy/edge/pretrained"
+            PTDICT = {
+                'swinv2_L_192_22k': 'swinv2_large_patch4_window12_192_22k.pth',
+            }
+            pretrainedpath = os.path.join(pretrained_dir, PTDICT[args.backbone])
+            checkpoint = torch.load(pretrainedpath, map_location='cpu')['model']
+            first_conv_weight = checkpoint['patch_embed.proj.weight']
+            # 取均值压缩通道（3→1）
+            new_conv_weight = first_conv_weight.mean(dim=1, keepdim=True)
+            checkpoint['patch_embed.proj.weight'] = new_conv_weight
+            from collections import OrderedDict
+            def key_select_function(keyname):
+                if 'head' in keyname:
+                    return False
+                if args.dilation and 'layers.3' in keyname:
+                    return False
+                return True
+            _tmp_st = OrderedDict({k:v for k, v in clean_state_dict(checkpoint).items() if key_select_function(k)})
+            _tmp_st_output = backbone.load_state_dict(_tmp_st, strict=False)
+            print("checkpoint",checkpoint,str(_tmp_st_output),backbone.num_features)
         bb_num_channels = backbone.num_features[4 - len(return_interm_indices):]
         backbone.num_channels = bb_num_channels 
     model = Joiner(backbone, position_embedding)
