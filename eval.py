@@ -78,7 +78,7 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth  /home/lyy/edge/output/2025-03-29-10-23-36_edge_dn/checkpoint0619.pth
-    parser.add_argument('--checkpoint', default='/home/lyy/edge/output/2025-04-02-21-32-01_edge_dn/checkpoint0609.pth', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
+    parser.add_argument('--checkpoint', default='/home/lyy/edge/output/2025-04-02-21-32-01_edge_swinv1+dn/checkpoint0609.pth', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
     parser.add_argument('--output_dir', default='eval_stru3d',
                         help='path where to save result')
 

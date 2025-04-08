@@ -306,7 +306,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     corners = get_corners_from_edges(corners)#get_polygon_vertices_matrix(edges)
                     # corners = remove_duplicate_corners(corners)
                     corners = np.around(corners).astype(np.int32)
-                    corners = merge_points(corners,2.5)#2.5
+                    corners = merge_points(corners,2)#2.5
                     # edges = np.around(edges).astype(np.int32)
 
                     if not semantic_rich:
@@ -344,7 +344,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 shapely_polygons.append(shapely_poly)
             try:
                 # shapely_polygons = remove_multi_polygon(shapely_polygons)
-                # shapely_polygons = remove_rooms_with_iou(shapely_polygons)
+                shapely_polygons = remove_rooms_with_iou(shapely_polygons)
                 polygon_list,overlap = refine_rooms(shapely_polygons,overlap)
                 # polygon_list = remove_multi_polygon(polygon_list)
                 room_ = []
@@ -360,7 +360,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
             except:
                 room_polys=room_polys
             #--------------存为npy文件-------------
-            save_path = os.path.join("best_npy_swint+edge+dn", f"0{scene_ids[0]}.npy")
+            save_path = os.path.join("best_npy_swint+edge+dn_train", f"0{scene_ids[0]}.npy")
  
             # 确保目录存在（如果不存在则自动创建）
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
