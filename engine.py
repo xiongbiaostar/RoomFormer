@@ -304,7 +304,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
 
                     #print("这",corners.shape)
                     corners = get_corners_from_edges(corners)#get_polygon_vertices_matrix(edges)
-                    # corners = remove_duplicate_corners(corners)
+                    corners = remove_duplicate_corners(corners)
                     corners = np.around(corners).astype(np.int32)
                     corners = merge_points(corners,2)#2.5
                     # edges = np.around(edges).astype(np.int32)
