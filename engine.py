@@ -81,7 +81,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(model, criterion, dataset_name, data_loader, device):
+def evaluate(model, criterion, dataset_name, data_loader, device,epoch=0):
     model.eval()
     criterion.eval()
 
@@ -216,7 +216,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-
+    time_all = []
     for batched_inputs in data_loader:
 
         samples = [x["image"].to(device) for x in batched_inputs]
@@ -253,10 +253,18 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     gt_sem_rich_path = os.path.join(output_dir, '{}_sem_rich_gt.png'.format(scene_ids[i]))
                     plot_semantic_rich_floorplan(gt_sem_rich, gt_sem_rich_path, prec=1, rec=1) 
 
-
+        torch.cuda.synchronize()  # 确保前面的操作都完成
+        start_time = time.time()
         outputs,_ = model(samples)
+        torch.cuda.synchronize()  # 等待 GPU 完成前向传播
+        end_time = time.time()
+        inference_time = (end_time - start_time) * 1000 
+        print("时间",inference_time)
+        time_all.append(inference_time)
+
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
+        # print("维度",pred_corners.shape)
         fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners
 
         if 'pred_room_logits' in outputs:
@@ -308,6 +316,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     corners = np.around(corners).astype(np.int32)
                     corners = merge_points(corners,2)#2.5
                     # edges = np.around(edges).astype(np.int32)
+                    # print(corners.shape)
 
                     if not semantic_rich:
                         # only regular rooms
@@ -452,6 +461,8 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     print("*************************************************")
     print(quant_result_dict)
     print("*************************************************")
+    avg_time = sum(time_all) / len(time_all)
+    print(f"Average inference time: {avg_time:.2f} ms")
 
     with open(os.path.join(output_dir, 'results.txt'), 'w') as file:
         file.write(json.dumps(quant_result_dict))
