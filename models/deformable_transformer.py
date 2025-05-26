@@ -365,8 +365,10 @@ class DeformableTransformerDecoder(nn.Module):
         intermediate_reference_points = []
         intermediate_classes = []
         point_classes = torch.zeros(output.shape[:2]).unsqueeze(-1).to(output.device)
+        # print("啊啊啊啊",reference_points.shape)
         for lid, layer in enumerate(self.layers):
             if reference_points.shape[-1] == 2:
+
                 reference_points_input = reference_points[:, :, None] * src_valid_ratios[:, None]
             if reference_points.shape[-1] == 4:
                 reference_points_input = reference_points[:, :, None] * torch.cat([src_valid_ratios, src_valid_ratios], -1)[:, None]
@@ -376,6 +378,7 @@ class DeformableTransformerDecoder(nn.Module):
 
             elif self.query_pos_type == 'none':
                 query_pos = None
+
 
             output = layer(output, query_pos, reference_points_input, src, src_spatial_shapes, src_level_start_index, src_padding_mask, tgt_masks)
     

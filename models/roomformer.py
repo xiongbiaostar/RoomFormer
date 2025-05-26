@@ -11,7 +11,7 @@ from .dn_components import prepare_for_dn, dn_post_process, compute_dn_loss
 
 from .backbone import build_backbone
 from .matcher import build_matcher
-from .losses import custom_L1_loss, MaskRasterizationLoss
+from .losses import custom_L1_loss, MaskRasterizationLoss,custom_angle_loss
 from .deformable_transformer import build_deforamble_transformer
 import copy
 
@@ -229,7 +229,7 @@ class SetCriterion(nn.Module):
         1) we compute hungarian assignment between ground truth polygons and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and coords)
     """
-    def __init__(self, num_classes, semantic_classes, matcher, weight_dict, losses):
+    def __init__(self, num_classes, semantic_classes, matcher, weight_dict, losses,angle):
         """ Create the criterion.
         Parameters:
             num_classes: number of classes for corner validity (binary)
@@ -245,6 +245,7 @@ class SetCriterion(nn.Module):
         self.weight_dict = weight_dict
         self.losses = losses
         self.raster_loss = MaskRasterizationLoss(None)
+        self.angle = angle
 
 
     def loss_labels(self, outputs, targets, indices):
@@ -304,11 +305,14 @@ class SetCriterion(nn.Module):
         src_polys = outputs['pred_coords'][idx]
         target_polys = torch.cat([t['coords'][i] for t, (_, i) in zip(targets, indices)], dim=0)
         target_len =  torch.cat([t['lengths'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-
-        loss_coords = custom_L1_loss(src_polys.flatten(1,2), target_polys, target_len)
+        loss_coords,loss_angles = custom_L1_loss(src_polys.flatten(1,2), target_polys, target_len,angle=self.angle)
+        # loss_angles = custom_angle_loss(src_polys.flatten(1, 2), target_polys, target_len)
 
         losses = {}
         losses['loss_coords'] = loss_coords
+        if self.angle:
+            print("用angle")
+            losses['loss_angles'] = loss_angles
 
         # omit the rasterization loss for semantically-rich floorplan
         if self.semantic_classes == -1:
@@ -338,7 +342,7 @@ class SetCriterion(nn.Module):
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, **kwargs)
 
-    def forward(self, outputs, targets, mask_dict=None):
+    def forward(self, outputs, targets, mask_dict=None,scene_ids=None,epoch=None):
         """ This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
@@ -381,7 +385,7 @@ class SetCriterion(nn.Module):
         aux_num = 0
         if 'aux_outputs' in outputs:
             aux_num = len(outputs['aux_outputs'])
-        dn_losses = compute_dn_loss(mask_dict, self.training, aux_num)
+        dn_losses = compute_dn_loss(mask_dict, self.training, aux_num,self.angle)
         losses.update(dn_losses)
         return losses
 
@@ -428,12 +432,17 @@ def build(args, train=True):
                     'loss_ce': args.cls_loss_coef, 
                     'loss_ce_room': args.room_cls_loss_coef,
                     'loss_coords': args.coords_loss_coef,
-                    'loss_raster': args.raster_loss_coef
+                    'loss_raster': args.raster_loss_coef,
+
                     }
     # dn loss
-
+    if args.use_angle_loss:
+        weight_dict['loss_angles'] = args.angles_loss_coef
+        weight_dict['tgt_loss_angles'] = args.angles_loss_coef
     weight_dict['tgt_loss_ce'] = args.cls_loss_coef
     weight_dict['tgt_loss_coords'] = args.coords_loss_coef
+    
+
     weight_dict['loss_dir'] = 1
 
     enc_weight_dict = {}
@@ -449,7 +458,7 @@ def build(args, train=True):
 
     losses = ['labels', 'polys', 'cardinality']
     # num_classes, matcher, weight_dict, losses
-    criterion = SetCriterion(num_classes, args.semantic_classes, matcher, weight_dict, losses)
+    criterion = SetCriterion(num_classes, args.semantic_classes, matcher, weight_dict, losses,args.use_angle_loss)
     criterion.to(device)
 
     return model, criterion

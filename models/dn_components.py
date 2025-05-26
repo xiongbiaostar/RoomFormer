@@ -2,7 +2,7 @@
 # DN-DETR
 # Copyright (c) 2022 IDEA. All Rights Reserved.
 # Licensed under the Apache License, Version 2.0 [see LICENSE for details]
-
+import cv2
 
 import torch
 import numpy as np
@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datasets import build_dataset
 
-from models.losses import custom_L1_loss, dn_L1_loss
+from models.losses import custom_L1_loss, dn_L1_loss,dn_angle_loss
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
                        accuracy, get_world_size, interpolate,
                        is_dist_avail_and_initialized, inverse_sigmoid)
@@ -22,7 +22,7 @@ from util.poly_ops import pad_gt_polys, get_gt_polys
 
 
 
-def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_queries, num_classes, hidden_dim, label_enc,num_query_per_poly=40):
+def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_queries, num_classes, hidden_dim, label_enc,num_query_per_poly=40,scene_ids=None):
     """
     The major difference from DN-DAB-DETR is that the author process pattern embedding pattern embedding in its detector
     forward function and use learnable tgt embedding, so we change this function a little bit.
@@ -126,6 +126,8 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
         # point_index = torch.randint(0, len(known_num), (1,)).item()
 
         #print("加噪部分", unmask_poly.shape,coords.shape,labels.shape,points_num_each_poly, known_num,known.shape,batch_idx.shape,labels.shape)
+        # print("坐标",coords.shape)
+        num_vis_poly = coords.shape[0]
         known_indice = known_indice.repeat(scalar, 1).view(-1)
         known_labels = labels.repeat(scalar, 1).view(-1)
         known_bid = batch_idx.repeat(scalar, 1).view(-1)
@@ -159,8 +161,12 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
                                            diff).cuda() * poly_noise_scale
 
             known_coords_expand = known_coords_expand.clamp(min=0.0, max=1.0)
-
-            # vis_noisePoly(known_coords_expand, points_num_each_poly[0])
+            # print(known_coords_expand.shape)
+            # vis_noisePoly_edges(known_coords_expand[:num_vis_poly], points_num_each_poly[0],scalar=0)
+            # vis_noisePoly_edges(known_coords_expand[num_vis_poly:num_vis_poly*2], points_num_each_poly[0],scalar=1)
+            # vis_noisePoly_edges(known_coords_expand[num_vis_poly*2:num_vis_poly*3], points_num_each_poly[0],scalar=2)
+            # vis_noisePoly_edges(known_coords_expand[num_vis_poly*3:num_vis_poly*4], points_num_each_poly[0],scalar=3)
+            # vis_noisePoly_edges(known_coords_expand[num_vis_poly*4::], points_num_each_poly[0],scalar=4)
             # vis_noisePoly(known_coords_expand[known_num[0]:], points_num_each_poly[1])
 
         m = known_labels_expaned.long().to('cuda')
@@ -288,7 +294,7 @@ def prepare_for_loss(mask_dict):
     return known_labels, known_polys, output_known_class, output_known_coord, known_lengths
 
 
-def tgt_loss_polys(src_polys, tgt_polys,target_len):
+def tgt_loss_polys(src_polys, tgt_polys,target_len,angle):
     """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
@@ -298,10 +304,15 @@ def tgt_loss_polys(src_polys, tgt_polys,target_len):
             'tgt_loss_coords': torch.as_tensor(0.).to('cuda')
         }
     # print("dn-loss-polys",tgt_polys.shape,src_polys.shape,src_polys.flatten(1,2).shape)
-    loss_coords = dn_L1_loss(src_polys, tgt_polys, target_len)
+
+    loss_coords,loss_angles = dn_L1_loss(src_polys, tgt_polys, target_len,angle=angle)
+    # loss_angles = dn_angle_loss(src_polys, tgt_polys, target_len)
 
     losses = {}
     losses['tgt_loss_coords'] = loss_coords
+    if angle:
+        print("dn算angle了")
+        losses['tgt_loss_angles'] = loss_angles
 
     return losses
 
@@ -327,7 +338,7 @@ def tgt_loss_labels(src_logits_, tgt_labels_, log=True):
     return losses
 
 
-def compute_dn_loss(mask_dict, training, aux_num):
+def compute_dn_loss(mask_dict, training, aux_num,angle):
     """
        compute dn loss in criterion
        Args:
@@ -342,10 +353,11 @@ def compute_dn_loss(mask_dict, training, aux_num):
         known_labels, known_polys, output_known_class, output_known_coord, known_lengths = prepare_for_loss(mask_dict)
         # print("compute_dn_loss",output_known_class[-1].shape, known_labels.shape,known_polys.shape,output_known_coord[-1].shape)
         losses.update(tgt_loss_labels(output_known_class[-1].view(-1), known_labels))
-        losses.update(tgt_loss_polys(output_known_coord[-1], known_polys, known_lengths))
+        losses.update(tgt_loss_polys(output_known_coord[-1], known_polys, known_lengths,angle))
     else:
         losses['tgt_loss_coords'] = torch.as_tensor(0.).to('cuda')
         losses['tgt_loss_ce'] = torch.as_tensor(0.).to('cuda')
+        losses['tgt_loss_angles'] = torch.as_tensor(0.).to('cuda')
     # print("compute_dn_loss",aux_num)
     if aux_num:
         for i in range(aux_num):
@@ -365,15 +377,14 @@ def compute_dn_loss(mask_dict, training, aux_num):
                 losses.update(l_dict)
     return losses
 
-def vis_noisePoly(polygon_data,lengths):
-    # 分割数据
+def vis_noisePoly_edges(polygon_data,lengths, canvas_size=(256, 256), scalar=0):
 
     polygons = []
 
     index = 0
 
     for length in lengths:
-        length=int(length/2)
+        length=int(length/4)
         polygon = polygon_data[index:index + length].cpu()
         if not np.array_equal(polygon[0], polygon[-1]):
             polygon = np.vstack([polygon, polygon[0]])
@@ -382,11 +393,13 @@ def vis_noisePoly(polygon_data,lengths):
         index += length
 
     for polygon in polygons:
-        x, y = polygon.T
+        # print("duo",polygon.shape)
+        x, y = polygon[:,:2].T
 
         plt.plot(x, y)
 
     plt.legend()
+    plt.axis('equal')
 
     plt.xlabel('X')
 
@@ -395,7 +408,7 @@ def vis_noisePoly(polygon_data,lengths):
     plt.title('Polygons')
 
     plt.grid(True)
-    plt.savefig("testdn.png")
+    plt.savefig(f"testdn{scalar}.png")
     plt.close()
 # if __name__ == '__main__':
 #     parser = argparse.ArgumentParser('RoomFormer training script', parents=[get_args_parser()])

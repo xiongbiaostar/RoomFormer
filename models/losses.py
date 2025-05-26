@@ -9,7 +9,7 @@ from detectron2.utils.events import get_event_storage
 from util.poly_ops import get_all_order_corners
 from diff_ras.polygon import SoftPolygon
 from util.bf_utils import get_union_box, rasterize_instances, POLY_LOSS_REGISTRY
-def dn_L1_loss(src_polys, target_polys, target_len):
+def dn_angle_loss(src_polys, target_polys, target_len):
     """L1 loss for coordinates regression
     We only calculate the loss between valid corners since we filter out invalid corners in final results
     Args:
@@ -29,14 +29,43 @@ def dn_L1_loss(src_polys, target_polys, target_len):
         all_polys = get_all_order_corners(tgt_poly_single)
         src_poly_single = src_polys[index:index+int(length/4)]
         src_poly_single=src_poly_single.reshape(-1)
-        src_poly_single=src_poly_single.unsqueeze(0)
+        all_dis = torch.cdist(src_poly_single.unsqueeze(0), all_polys , p=1).min()
+        min_dis_idx = torch.argmin(all_dis).item()#找出最小距离的index，相当于是需要roll几次
+        src_poly_single = src_poly_single.view(-1,4)
+        tgt_matched_poly = all_polys[min_dis_idx].view(-1,4)
+        pred_vec = src_poly_single[:,2:]-src_poly_single[:,:2]
+        tgt_vec = tgt_matched_poly[:,2:]-tgt_matched_poly[:,:2]
+        cos_theta = ((pred_vec * tgt_vec).sum(-1)+1e-9)/(torch.norm(pred_vec, p=2, dim=-1)*torch.norm(tgt_vec, p=2, dim=-1)+1e-9)
+        loss = 1 - cos_theta.abs()  # 边是平行/反向都可以
+        total_loss+=loss.mean()
 
-        total_loss += torch.cdist(src_poly_single, all_polys , p=1).min()
-        index += int(length/4)
-    # print("dn",total_loss,target_len.sum())
-    total_loss = total_loss/target_len.sum()
-    return total_loss
-def custom_L1_loss(src_polys, target_polys, target_len):
+    return total_loss/len(target_len)
+def custom_angle_loss(src_polys, target_polys, target_len):
+    """L1 loss for coordinates regression
+    We only calculate the loss between valid corners since we filter out invalid corners in final results
+    Args:
+        src_polys: Tensor of dim [num_target_polys, num_queries_per_poly*2] with the matched predicted polygons coordinates
+        target_polys: Tensor of dim [num_target_polys, num_queries_per_poly*2] with the target polygons coordinates
+        target_len: list of size num_target_polys, each element indicates 2 * num_corners of this poly
+    """
+    total_loss = 0
+    num_poly = target_polys.shape[0]
+    for i in range(num_poly):
+        tgt_poly_single = target_polys[i, :target_len[i]] #每个多边形内部的边数
+        all_polys = get_all_order_corners(tgt_poly_single)
+        #get all possible arrange and find best match
+        all_dis = torch.cdist(src_polys[i, :target_len[i]].unsqueeze(0), all_polys, p=1) #距离
+        min_dis_idx = torch.argmin(all_dis).item()#找出最小距离的index，相当于是需要roll几次
+        tgt_matched_poly = all_polys[min_dis_idx].view(-1,4)
+        src_poly_single = src_polys[i, :target_len[i]].view(-1,4)
+        pred_vec = src_poly_single[:,2:]-src_poly_single[:,:2]
+        tgt_vec = tgt_matched_poly[:,2:]-tgt_matched_poly[:,:2]
+        cos_theta = ((pred_vec * tgt_vec).sum(-1)+1e-9)/(torch.norm(pred_vec, p=2, dim=-1)*torch.norm(tgt_vec, p=2, dim=-1)+1e-9)
+        loss = 1 - cos_theta.abs()  # 边是平行/反向都可以
+        total_loss+=loss.mean()
+        # print(loss,total_loss)
+    return total_loss/num_poly
+def dn_L1_loss(src_polys, target_polys, target_len,angle=False):
     """L1 loss for coordinates regression
     We only calculate the loss between valid corners since we filter out invalid corners in final results
     Args:
@@ -45,12 +74,71 @@ def custom_L1_loss(src_polys, target_polys, target_len):
         target_len: list of size num_target_polys, each element indicates 2 * num_corners of this poly
     """
     total_loss = 0.
-    for i in range(target_polys.shape[0]):
-        tgt_poly_single = target_polys[i, :target_len[i]]
+    angle_loss = 0.
+    index = 0
+    target_polys = target_polys.float()
+    # print("dnl1loss", target_len.shape,target_polys.shape)
+    for length in target_len:
+        tgt_poly_single = target_polys[index:index+int(length/4)]
+        
+        # print("dnl1loss",length,tgt_poly_single)
+        tgt_poly_single = tgt_poly_single.view(-1)
+        # print("这里",tgt_poly_single.shape)
         all_polys = get_all_order_corners(tgt_poly_single)
-        total_loss += torch.cdist(src_polys[i, :target_len[i]].unsqueeze(0), all_polys , p=1).min()
+        src_poly_single = src_polys[index:index+int(length/4)]
+        src_poly_single=src_poly_single.reshape(-1)
+        all_dis = torch.cdist(src_poly_single.unsqueeze(0), all_polys , p=1)
+        total_loss += all_dis.min()
+        if angle:
+            min_dis_idx = torch.argmin(all_dis).item()#找出最小距离的index，相当于是需要roll几次
+            src_poly_single = src_poly_single.view(-1,4)
+            tgt_matched_poly = all_polys[min_dis_idx].view(-1,4)
+            pred_vec = src_poly_single[:,2:]-src_poly_single[:,:2]
+            tgt_vec = tgt_matched_poly[:,2:]-tgt_matched_poly[:,:2]
+            pred_vec_norm = torch.norm(pred_vec, dim=-1, keepdim=True).clamp(min=1e-8)
+            tgt_vec_norm = torch.norm(tgt_vec, dim=-1, keepdim=True).clamp(min=1e-8)
+            pred_vec_norm = pred_vec/pred_vec_norm
+            tgt_vec_norm = tgt_vec/tgt_vec_norm
+            # print("对比归一化",pred_vec,pred_vec_norm,tgt_vec,tgt_vec_norm)
+            cos_theta = (pred_vec_norm * tgt_vec_norm).sum(dim=-1).clamp(-1.0, 1.0)
+            # cos_theta_nonorm = ((pred_vec * tgt_vec).sum(-1)+1e-9)/(torch.norm(pred_vec, p=2, dim=-1)*torch.norm(tgt_vec, p=2, dim=-1)+1e-8)
+            # print("对比cos",cos_theta,cos_theta_nonorm)
+            loss = 1 - cos_theta**2  # 边是平行/反向都可以
+            angle_loss+=loss.mean()
+        index += int(length/4)
+    # print("dn",total_loss,target_len.sum())
     total_loss = total_loss/target_len.sum()
-    return total_loss
+    angle_loss = angle_loss/len(target_len)
+    return total_loss,angle_loss
+def custom_L1_loss(src_polys, target_polys, target_len,angle=False):
+    """L1 loss for coordinates regression
+    We only calculate the loss between valid corners since we filter out invalid corners in final results
+    Args:
+        src_polys: Tensor of dim [num_target_polys, num_queries_per_poly*2] with the matched predicted polygons coordinates
+        target_polys: Tensor of dim [num_target_polys, num_queries_per_poly*2] with the target polygons coordinates
+        target_len: list of size num_target_polys, each element indicates 2 * num_corners of this poly
+    """
+    total_loss = 0.
+    angle_loss = 0.
+    num_poly = target_polys.shape[0]
+    # print("循环几次",num_poly)
+    for i in range(target_polys.shape[0]):
+        tgt_poly_single = target_polys[i, :target_len[i]]#[num_poly*4]
+        all_polys = get_all_order_corners(tgt_poly_single)#[排列的个数，num_poly*4]
+        all_dis = torch.cdist(src_polys[i, :target_len[i]].unsqueeze(0), all_polys, p=1) #距离
+        total_loss += all_dis.min()
+        if angle:
+            min_dis_idx = torch.argmin(all_dis)#找出最小距离的index，相当于是需要roll几次
+            tgt_matched_poly = all_polys[min_dis_idx].view(-1,4)
+            src_poly_single = src_polys[i, :target_len[i]].view(-1,4)
+            pred_vec = src_poly_single[:,2:]-src_poly_single[:,:2]
+            tgt_vec = tgt_matched_poly[:,2:]-tgt_matched_poly[:,:2]
+            cos_theta = ((pred_vec * tgt_vec).sum(-1)+1e-9)/(torch.norm(pred_vec, p=2, dim=-1)*torch.norm(tgt_vec, p=2, dim=-1)+1e-9)
+            loss = 1 - cos_theta**2  # 边是平行/反向都可以
+            angle_loss+=loss.mean()            
+    total_loss = total_loss/target_len.sum()
+    angle_loss = angle_loss/num_poly
+    return total_loss,angle_loss
     
 class ClippingStrategy(nn.Module):
     def __init__(self, cfg, is_boundary=False):

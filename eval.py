@@ -20,8 +20,8 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int)
 
     # backbone
-    parser.add_argument('--backbone', default='swin_L_384_22k', type=str,
-                        help="Name of the convolutional backbone to use")
+    parser.add_argument('--backbone', default='swinv2_L_192_22k', type=str,
+                        help="Name of the convolutional backbone to use")#swin_L_384_22k
     parser.add_argument('--lr_backbone', default=0, type=float)
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -78,9 +78,10 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth  /home/lyy/edge/output/2025-03-29-10-23-36_edge_dn/checkpoint0619.pth
-    parser.add_argument('--checkpoint', default='/home/lyy/edge/output/2025-04-02-21-32-01_edge_swinv1+dn/checkpoint0609.pth', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
+    parser.add_argument('--checkpoint', default='', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
     parser.add_argument('--output_dir', default='eval_stru3d',
                         help='path where to save result')
+    parser.add_argument('--use_angle_loss',default=True,type=bool)
 
     # visualization options
     parser.add_argument('--plot_pred', default=True, type=bool, help="plot predicted floorplan")

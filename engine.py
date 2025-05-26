@@ -12,7 +12,7 @@ from shapely.geometry import Polygon
 import torch
 
 import util.misc as utils
-
+from contextlib import redirect_stdout
 
 from s3d_floorplan_eval.Evaluator.Evaluator import Evaluator
 from s3d_floorplan_eval.options import MCSSOptions
@@ -36,7 +36,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('grad_norm', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
-
+    
     for batched_inputs in metric_logger.log_every(data_loader, print_freq, header):
         samples = [x["image"].to(device) for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
@@ -81,10 +81,34 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(model, criterion, dataset_name, data_loader, device):
+def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
     model.eval()
     criterion.eval()
+    output_dir = "val_prediction_coco_new"
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
+    if epoch is not None and epoch%10 == 0:
+            #预测coco格式文件
+        pred_file_path = f"predictions_epoch_{epoch}.json"
+        pred_file_path = os.path.join(output_dir,pred_file_path)
 
+        # 初始写入空列表结构（后续逐行追加）
+        with open(pred_file_path, "w") as f:
+            json.dump([], f)  # 初始化为空列表
+        edge_json_dir = "val_prediction_edge_new"
+        if not os.path.exists(edge_json_dir):
+            os.mkdir(edge_json_dir)
+        corner_json_dir = "val_prediction_corner_new"
+        if not os.path.exists(corner_json_dir):
+            os.mkdir(corner_json_dir)
+        corner_json_path= f"predictions_epoch_{epoch}.json"
+        corner_json_path = os.path.join(corner_json_dir,corner_json_path)
+        with open(corner_json_path, "w") as f:
+            json.dump({}, f)  # 初始化为空列表
+        edge_json_path= f"predictions_epoch_{epoch}.json"
+        edge_json_path = os.path.join(edge_json_dir,edge_json_path)
+        with open(edge_json_path, "w") as f:
+            json.dump({}, f)  # 初始化为空列表
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
 
@@ -97,7 +121,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
 
 
         outputs,_ = model(samples)
-        loss_dict = criterion(outputs, room_targets)
+        loss_dict = criterion(outputs, room_targets,None,scene_ids,epoch)
         weight_dict = criterion.weight_dict
         weight_dict['loss_coords']=5
         weight_dict['tgt_loss_coords'] = 5
@@ -105,7 +129,9 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         bs = outputs['pred_logits'].shape[0]
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
-        fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners
+        pred_logits = torch.sigmoid(pred_logits)
+
+        fg_mask = pred_logits> 0.5 # select valid corners
 
         if 'pred_room_logits' in outputs:
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
@@ -130,8 +156,10 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
 
             fg_mask_per_scene = fg_mask[i]
             pred_corners_per_scene = pred_corners[i]
+            pred_logits_per_scene = pred_logits[i]
 
             room_polys = []
+            room_edges = []
             
             semantic_rich = 'pred_room_logits' in outputs
             if semantic_rich:
@@ -144,16 +172,28 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
             for j in range(fg_mask_per_scene.shape[0]):
                 fg_mask_per_room = fg_mask_per_scene[j]
                 pred_corners_per_room = pred_corners_per_scene[j]
+                pred_logits_per_room = pred_logits_per_scene[j][fg_mask_per_room].cpu().numpy()
+
                 valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
                 if len(valid_corners_per_room)>0:
                     corners = (valid_corners_per_room * 255).cpu().numpy()
-                    corners = corners[:,:2]
+                    edges = corners
+                    corners,filtered_pred_logits = remove_short_edges(corners,pred_logits_per_room)
+                    corners = get_corners_from_edges(corners,filtered_pred_logits)#g
+                    
+
+
+
+                    corners = remove_duplicate_corners(corners)
                     corners = np.around(corners).astype(np.int32)
+                    corners = merge_points(corners,2)#2.5
+                    edges = np.around(edges).astype(np.int32)
 
                     if not semantic_rich:
                         # only regular rooms
                         if len(corners)>=4 and Polygon(corners).area >= 100:
                                 room_polys.append(corners)
+                                room_edges.append(edges)
                     else:
                         # regular rooms
                         if pred_room_label_per_scene[j] not in [16,17]:
@@ -164,7 +204,45 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
                         elif len(corners)==2:
                             window_doors.append(corners)
                             window_doors_types.append(pred_room_label_per_scene[j])
-                    
+            overlap=False
+            shapely_polygons = []
+            for np_array in room_polys:
+                # 1. 转换为元组列表
+                points = [tuple(point) for point in np_array]
+                
+                # 2. 闭合多边形（如果未闭合）
+                if len(points) > 0 and points[0] != points[-1]:
+                    points.append(points[0])
+                
+                # 3. 创建Shapely Polygon对象
+                shapely_poly = Polygon(points)
+                shapely_polygons.append(shapely_poly)
+            try:
+                shapely_polygons = remove_multi_polygon(shapely_polygons)
+                shapely_polygons = remove_rooms_with_iou(shapely_polygons)
+                polygon_list,overlap = refine_rooms(shapely_polygons,overlap)
+                # polygon_list = remove_multi_polygon(polygon_list)
+                room_ = []
+                for polygon in polygon_list:
+                    # try:
+                    room = np.array(polygon.exterior.coords, dtype=np.int32)[:-1]
+                    room_.append(room)
+                    # except:
+                    #     print("是这里的原因吗")
+                    #     room_.append(polygon)
+
+                room_polys=room_
+            except:
+                room_polys=room_polys
+            
+            
+            if epoch is not None and epoch%10 == 0:
+                process_and_write_scene(scene_id=scene_ids[i],room_poly=room_polys,pred_file_path=pred_file_path)          
+                append_corner_to_json(edge_json_path,scene_ids[i], room_edges)
+                append_corner_to_json(corner_json_path,scene_ids[i],room_polys)
+
+     
+            
             if dataset_name == 'stru3d':
                 if not semantic_rich:
                     quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys)
@@ -210,12 +288,14 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
 @torch.no_grad()
 def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pred=True, plot_density=True, plot_gt=True, semantic_rich=False):
     model.eval()
-
+    time_all = []
     quant_result_dict = None
     scene_counter = 0
     
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
+    # with open('output_lcy.txt', 'w', encoding='utf-8') as f:
+        # with redirect_stdout(f):  # 重定向整个调用过程的输出
 
     for batched_inputs in data_loader:
 
@@ -253,12 +333,16 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     gt_sem_rich_path = os.path.join(output_dir, '{}_sem_rich_gt.png'.format(scene_ids[i]))
                     plot_semantic_rich_floorplan(gt_sem_rich, gt_sem_rich_path, prec=1, rec=1) 
 
-
+        start_time = time.time()
         outputs,_ = model(samples)
+        end_time = time.time()
+        inference_time = (end_time - start_time) * 1000 
+        # print("时间",inference_time)
+        time_all.append(inference_time)
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
-        fg_mask = torch.sigmoid(pred_logits) > 0.5 # select valid corners
-
+        pred_logits = torch.sigmoid(pred_logits)
+        fg_mask = pred_logits > 0.5 # select valid corners
         if 'pred_room_logits' in outputs:
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
             _, pred_room_label = prob[..., :-1].max(-1)
@@ -280,6 +364,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
             print("Running Evaluation for scene %s" % scene_ids[i])
 
             fg_mask_per_scene = fg_mask[i]
+            pred_logits_per_scene = pred_logits[i]
             pred_corners_per_scene = pred_corners[i]
             room_polys = []
             room_edges = []
@@ -293,42 +378,52 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
 
             # process per room
             for j in range(fg_mask_per_scene.shape[0]):
-                fg_mask_per_room = fg_mask_per_scene[j]
-                pred_corners_per_room = pred_corners_per_scene[j]
-                valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
-                if len(valid_corners_per_room)>0:
-                    corners = (valid_corners_per_room * 255).cpu().numpy()
-                    corners = remove_short_edges(corners)
-                    # print("移除短边",corners.shape)
-                    edges = corners
+                # if scene_ids[i] in [3362]:
+                    fg_mask_per_room = fg_mask_per_scene[j]
+                    # print("有效性",pred_logits_per_scene,fg_mask_per_room)
+                    pred_logits_per_room = pred_logits_per_scene[j][fg_mask_per_room].cpu().numpy()
+                    
+                    pred_corners_per_room = pred_corners_per_scene[j]
 
-                    #print("这",corners.shape)
-                    corners = get_corners_from_edges(corners)#get_polygon_vertices_matrix(edges)
-                    corners = remove_duplicate_corners(corners)
-                    corners = np.around(corners).astype(np.int32)
-                    corners = merge_points(corners,2)#2.5
-                    # edges = np.around(edges).astype(np.int32)
+                    valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
+                    # if scene_ids[i] in [3493]:
+                        # print(fg_mask_per_room,len(valid_corners_per_room))
+                    if len(valid_corners_per_room)>0:
+                        corners = (valid_corners_per_room * 255).cpu().numpy()
+                        edges = corners
+                        corners = remove_short_edges(corners,pred_logits_per_room)
+                        # print("移除短边",corners.shape)
+                        
 
-                    if not semantic_rich:
-                        # only regular rooms
-                        if len(corners)>=4 and Polygon(corners).area >= 100:
-                                room_polys.append(corners)
-                                room_edges.append(edges)
-                                # length = np.sqrt((edges[:, 2] - edges[:, 0])**2 + (edges[:, 3] - edges[:, 1])**2)
+                        corners = get_corners_from_edges(corners,pred_logits_per_room)#get_polygon_vertices_matrix(edges)
+                        corners = remove_duplicate_corners(corners)
+                        corners = np.around(corners).astype(np.int32)
+                        corners = merge_points(corners,2)#2.5
+                        edges = np.around(edges).astype(np.int32)
+                        # if scene_ids[i] in [3284,3344,3256]:
+                        #     print(edges)
+                        #     print(pred_logits_per_room)
 
-                    else:
-                        # regular rooms
-                        if pred_room_label_per_scene[j] not in [16,17]:
-                            if len(corners)>=4 and Polygon(corners).area >= 100:
-                                room_polys.append(corners)
+                        if not semantic_rich:
+                            # only regular rooms
+                            if len(corners)>=4 :#and Polygon(corners).area >= 100:
+                                    room_polys.append(corners)
+                                    room_edges.append(edges)
+                                    # length = np.sqrt((edges[:, 2] - edges[:, 0])**2 + (edges[:, 3] - edges[:, 1])**2)
 
-                                room_types.append(pred_room_label_per_scene[j])
-                        # window / door
-                        elif len(corners)==2:
-                            window_doors.append(corners)
-                            window_doors_types.append(pred_room_label_per_scene[j])
-            if scene_ids[0] in [3407]:
-                print(scene_ids,room_edges,room_polys)
+                        else:
+                            # regular rooms
+                            if pred_room_label_per_scene[j] not in [16,17]:
+                                if len(corners)>=4 and Polygon(corners).area >= 100:
+                                    room_polys.append(corners)
+
+                                    room_types.append(pred_room_label_per_scene[j])
+                            # window / door
+                            elif len(corners)==2:
+                                window_doors.append(corners)
+                                window_doors_types.append(pred_room_label_per_scene[j])
+            # if scene_ids[0] in [3493]:
+            #     print(scene_ids,room_edges,pred_corners_per_room)
             overlap=False
             shapely_polygons = []
             for np_array in room_polys:
@@ -361,7 +456,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 room_polys=room_polys
             #--------------存为npy文件-------------
             save_path = os.path.join("best_npy_swint+edge+dn_train", f"0{scene_ids[0]}.npy")
- 
+
             # 确保目录存在（如果不存在则自动创建）
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             np.save(save_path, room_polys)
@@ -412,7 +507,9 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     cv2.imwrite(os.path.join(output_dir, '{}_pred_floorplan.png'.format(scene_ids[i])), floorplan_map)
 #----------------把边绘制出来---------------------------------------
             room_edges = [np.array(r) for r in room_edges]
-            edge_map = plot_floorplan_with_edges(room_edges, scale=1000)
+            density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
+            edge_map = plot_floorplan_with_edges(room_edges, scale=1000,density_map = density_map)
+
             cv2.imwrite(os.path.join(output_dir, '{}_pred_edge.png'.format(scene_ids[i])), edge_map)
             density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
             density_map = np.repeat(density_map, 3, axis=2)
@@ -452,6 +549,83 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     print("*************************************************")
     print(quant_result_dict)
     print("*************************************************")
-
+    avg_time = sum(time_all) / len(time_all)
+    print(f"Average inference time: {avg_time:.2f} ms")
     with open(os.path.join(output_dir, 'results.txt'), 'w') as file:
         file.write(json.dumps(quant_result_dict))
+def return_inter(scene_id, output_class, outputs_coord, total_results):
+    output_class = output_class.squeeze(1)  # (6, 20, 40)
+    output_class = torch.sigmoid(output_class)
+    outputs_coord = outputs_coord.squeeze(1)  # (6, 20, 40, 4)
+
+    for layer_idx in range(output_class.shape[0]):  # 6层
+        for query_idx in range(output_class.shape[1]):  # 20个queries
+            class_logits = output_class[layer_idx, query_idx]  # (40,)
+            coords = outputs_coord[layer_idx, query_idx]       # (40, 4)
+            # print(coords.shape,class_logits.shape)
+            pred_class = class_logits.tolist()
+            pred_coords = coords.tolist()  # 变成 list
+
+            total_results.append({
+                'scene_id': scene_id,
+                'layer_id': layer_idx,
+                'query_id': query_idx,
+                'class': pred_class,
+                'polygon_edges': pred_coords
+            })
+def bounding_box_from_points(points):
+    points = np.array(points).flatten()
+    even_locations = np.arange(points.shape[0]/2) * 2
+    odd_locations = even_locations + 1
+    X = np.take(points, even_locations.tolist())
+    Y = np.take(points, odd_locations.tolist())
+    bbox = [X.min(), Y.min(), X.max()-X.min(), Y.max()-Y.min()]
+    bbox = [int(b) for b in bbox]
+    return bbox
+def single_annotation(image_id, poly):
+    _result = {}
+    _result["image_id"] = int(image_id)
+    _result["category_id"] = 100 
+    _result["score"] = 1
+    _result["segmentation"] = poly
+    _result["bbox"] = bounding_box_from_points(_result["segmentation"])
+    return _result
+
+def process_and_write_scene(scene_id, room_poly, pred_file_path):
+    """处理单个场景并增量写入预测文件"""
+    scene_predictions = []
+    
+    for polygon in room_poly:
+        # 确保 polygon 是 (N,2) 的二维坐标数组
+        polygon = np.array(polygon).reshape(-1, 2)
+        
+        # 转换多边形为 COCO 格式
+        segmentation = polygon.flatten().tolist()
+ 
+        scene_predictions.append(single_annotation(scene_id,[segmentation]))
+    
+    # 增量追加到文件
+    with open(pred_file_path, "r+") as f:
+        # 读取现有数据
+        existing_data = json.load(f)
+        # 追加当前场景的预测
+        existing_data.extend(scene_predictions)
+        # 写回文件
+        f.seek(0)
+        json.dump(existing_data, f)
+def append_corner_to_json(corner_json_path, scene_id, room_polys):
+    # Step 1: 先尝试读取旧的 JSON 文件
+    if os.path.exists(corner_json_path):
+        with open(corner_json_path, "r") as f:
+            corner_json_dict = json.load(f)
+    else:
+        corner_json_dict = {}
+
+    # Step 2: 添加新内容
+    corner_json_dict[str(scene_id)] = {
+        "corners": [arr.tolist() for arr in room_polys]
+    }
+
+    # Step 3: 写回完整 JSON 文件
+    with open(corner_json_path, "w") as f:
+        json.dump(corner_json_dict, f, indent=4)

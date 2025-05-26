@@ -93,21 +93,22 @@ def get_args_parser():
     parser.add_argument('--room_cls_loss_coef', default=0.2, type=float)
     parser.add_argument('--coords_loss_coef', default=6, type=float)
     parser.add_argument('--raster_loss_coef', default=1, type=float)
+    parser.add_argument('--angles_loss_coef', default=0.5, type=float)
 
     # dataset parameters
     parser.add_argument('--dataset_name', default='stru3d')
-    parser.add_argument('--dataset_root', default='/home/lyy/edge/data/stru3d', type=str)
+    parser.add_argument('--dataset_root', default='data/stru3d', type=str)
 
     parser.add_argument('--output_dir', default='output',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/home/lyy/edge/output/2025-04-12-22-22-30_edge_dn_swinv2ceweight0.6_coord6/checkpoint0559.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--job_name', default='edge_dn_swinv1ceweight0.6_coord6', type=str)
+    parser.add_argument('--job_name', default='edge_dn_angle_0.5', type=str)
     parser.add_argument('--use_dn', action="store_true",
                         help="use denoising training.")
     parser.add_argument('--scalar', default=5, type=int,
@@ -116,7 +117,7 @@ def get_args_parser():
                         help="label noise ratio to flip")
     parser.add_argument('--poly_noise_scale', default=0.4, type=float,
                         help="poly noise scale to shift and scale")
-    
+    parser.add_argument('--use_angle_loss',default=False,type=bool)
 
     #swin_transformer
     # parser.add_argument('--dilation', default=False, type=bool)
@@ -306,7 +307,7 @@ def main(args):
             "val_metrics/angles_prec": test_stats['angles_prec'],
             "val_metrics/angles_rec": test_stats['angles_rec']
         }
-
+        
         if args.semantic_classes > 0:
             # need to log additional metrics for semantically-rich floorplans
             train_log_dict["train/loss_ce_room"] = train_stats['loss_ce_room']
@@ -324,7 +325,13 @@ def main(args):
         if 'room_iou' in test_stats:
             val_log_dict["val_metrics/room_iou"] = test_stats['room_iou']
                 
-
+        if args.use_angle_loss:
+            train_log_dict["train/tgt_loss_angles"] = train_stats['tgt_loss_angles']
+            train_log_dict["train/loss_angles"] =   train_stats['loss_angles']
+            val_log_dict["val/loss_angles"] = test_stats['loss_angles']
+            tensorboardwriter.add_scalar('training loss/loss_angles', train_log_dict["train/loss_angles"], epoch)
+            tensorboardwriter.add_scalar('training loss/tgt_loss_angles', train_log_dict["train/tgt_loss_angles"], epoch)
+            tensorboardwriter.add_scalar('validation loss/loss_angles', val_log_dict["val/loss_angles"], epoch)
 
         if args.output_dir:
             with (output_dir / "log.txt").open("a") as f:
@@ -332,6 +339,7 @@ def main(args):
         tensorboardwriter.add_scalar('lr',train_stats['lr'] , epoch)
         tensorboardwriter.add_scalar('training loss/loss_all', train_log_dict["train/loss"], epoch)
         tensorboardwriter.add_scalar('training loss/loss_ce', train_log_dict["train/loss_ce"], epoch)
+
         tensorboardwriter.add_scalar('training loss/loss_coords', train_log_dict["train/loss_coords"], epoch)
         tensorboardwriter.add_scalar('training loss/loss_raster', train_log_dict["train/loss_raster"], epoch)
         tensorboardwriter.add_scalar('training loss/tgt_loss_ce', train_log_dict["train/tgt_loss_ce"], epoch)

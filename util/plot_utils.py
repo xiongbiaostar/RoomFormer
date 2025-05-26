@@ -34,19 +34,48 @@ colors_12 = [
     "#800000",
     "#aaffc3",
     "#808000",
+    "#ffd7b4",
+       "#3cb44b",
+    "#ffe119",
+    "#0082c8",
+    "#f58230",
+    "#911eb4",
+    "#46f0f0",
+    "#f032e6",
+    "#d2f53c",
+    "#fabebe",
+    "#008080",
+    "#e6beff",
+    "#aa6e28",
+    "#fffac8",
+    "#800000",
+    "#aaffc3",
+    "#808000",
     "#ffd7b4"
 ]
+# colors_lines_from_red_to_green = [
+#     (0, 0, 255),
+#     (0, 56, 255),
+#     (0, 113, 255),
+#     (0, 170, 255),
+#     (0, 226, 255),
+#     (0, 255, 226),
+#     (0, 255, 170),
+#     (0, 255, 113),
+#     (0, 255, 56),
+#     (0, 255, 0)
+# ]
 colors_lines_from_red_to_green = [
-    (0, 0, 255),
-    (0, 56, 255),
-    (0, 113, 255),
-    (0, 170, 255),
-    (0, 226, 255),
-    (0, 255, 226),
-    (0, 255, 170),
-    (0, 255, 113),
-    (0, 255, 56),
-    (0, 255, 0)
+    (144, 238, 144), #绿色
+    (171, 130, 255), #紫色
+    (255, 181, 197),
+    (255, 114, 86),
+    (255, 215, 0),
+    (187,255,255),
+    (255, 218, 185),
+    (255, 228, 225),
+    (135, 206, 255)
+    
 ]
 
 semantics_cmap = {
@@ -101,32 +130,40 @@ RED = '#ff3333'
 BLACK = '#000000'
 
 
-def plot_floorplan_with_edges(regions, corners=None, edges=None, scale=256):
+def plot_floorplan_with_edges(regions, corners=None, edges=None, scale=256,density_map = None):
     """Draw floorplan map where different colors indicate different rooms
     """
-    colors = colors_12
+    # colors = colors_lines_from_red_to_green
 
     regions = [(region * scale / 256).round().astype(np.int) for region in regions]
 
     # define the color map
-    room_colors = [colors[i] for i in range(len(regions))]
+    # room_colors = [colors[i] for i in range(len(regions))]
 
-    colorMap = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in room_colors]
-    colorMap = np.asarray(colorMap)
-    if len(regions) > 0:
-        colorMap = np.concatenate([np.full(shape=(1, 3), fill_value=0), colorMap], axis=0).astype(
-            np.uint8)
-    else:
-        colorMap = np.concatenate([np.full(shape=(1, 3), fill_value=0)], axis=0).astype(
-            np.uint8)
+    # colorMap = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in room_colors]
+    # colorMap = np.asarray(colorMap)
+    # if len(regions) > 0:
+    #     colorMap = np.concatenate([np.full(shape=(1, 3), fill_value=0), colorMap], axis=0).astype(
+    #         np.uint8)
+    # else:
+    #     colorMap = np.concatenate([np.full(shape=(1, 3), fill_value=0)], axis=0).astype(
+    #         np.uint8)
     # when using opencv, we need to flip, from RGB to BGR
-    colorMap = colorMap[:, ::-1]
+    # colorMap = colorMap[:, ::-1]
 
-    alpha_channels = np.zeros(colorMap.shape[0], dtype=np.uint8)
-    alpha_channels[1:len(regions) + 1] = 150
+    # alpha_channels = np.zeros(colorMap.shape[0], dtype=np.uint8)
+    # alpha_channels[1:len(regions) + 1] = 150
 
-    colorMap = np.concatenate([colorMap, np.expand_dims(alpha_channels, axis=-1)], axis=-1)
-
+    # colorMap = np.concatenate([colorMap, np.expand_dims(alpha_channels, axis=-1)], axis=-1)
+        # Create base image
+    if density_map is not None:
+        # Resize and invert density map
+        density_map = cv2.resize(density_map, (scale, scale), interpolation=cv2.INTER_LINEAR)
+        density_map = 255 - density_map  # invert grayscale
+        image = cv2.cvtColor(density_map, cv2.COLOR_GRAY2BGR)  # convert to 3-channel
+    else:
+        # Default: blank white background
+        image = np.ones((scale, scale, 3), dtype=np.uint8) * 255
     room_map = np.zeros([scale, scale]).astype(np.int32)
     # sort regions
     # if len(regions) > 1:
@@ -137,26 +174,27 @@ def plot_floorplan_with_edges(regions, corners=None, edges=None, scale=256):
     # for idx, polygon in enumerate(regions):
     #     cv2.fillPoly(room_map, [polygon], color=idx + 1)
 
-    image = colorMap[room_map.reshape(-1)].reshape((scale, scale, 4)) 
+    # image = colorMap[room_map.reshape(-1)].reshape((scale, scale, 4)) 
 
     pointColor = (0,0,0,255)
     lineColor = (0,0,0,255)
 
-    for region in regions:
-        for i, point in enumerate(region):
+    for i,region in enumerate(regions):
+        red,green,blue =  colors_lines_from_red_to_green[i%9] 
+        for  point in region:
             # if i == len(region)-1:
             #     cv2.line(image, tuple(point[:2]), tuple(region[0]), color=lineColor, thickness=5)
             #     cv2.line(image, tuple(point[:2]), tuple(region[0]), color=lineColor, thickness=5)
             # else: 
-            blue,green,red =  colors_lines_from_red_to_green[i%10]  
-            cv2.line(image, tuple(point[:2]), tuple(point[2:]), color=(int(blue), int(green), int(red),255), thickness=2)
+ 
+            cv2.line(image, tuple(point[:2]), tuple(point[2:]), color=(int(blue), int(green), int(red),255), thickness=8)
 
     for region in regions:
         for i, point in enumerate(region):
-            cv2.circle(image, tuple(point[:2]), color=pointColor, radius=6, thickness=-1)
-            cv2.circle(image, tuple(point[:2]), color=(255, 255, 255, 0), radius=3, thickness=-1)
-            cv2.circle(image, tuple(point[2:]), color=pointColor, radius=6, thickness=-1)
-            cv2.circle(image, tuple(point[2:]), color=(255, 255, 255, 0), radius=3, thickness=-1)
+            cv2.circle(image, tuple(point[:2]), color=pointColor, radius=10, thickness=5)
+            cv2.circle(image, tuple(point[:2]), color=(255,255,255), radius=5, thickness=-1)
+            cv2.circle(image, tuple(point[2:]), color=pointColor, radius=10, thickness=5)
+            cv2.circle(image, tuple(point[2:]), color=(255,255,255), radius=5, thickness=-1)
 
     return image
 def plot_floorplan_with_regions(regions, corners=None, edges=None, scale=256):

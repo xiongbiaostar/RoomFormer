@@ -179,8 +179,8 @@ def detect_duplicate_edges(edges: np.ndarray,
             else:
                 keep_mask[(i + 1) % n] = False
     return keep_mask
-def remove_short_edges(edges,pred_logits, threshold=5):
-    # print(edges.shape)
+def remove_short_edges(edges, threshold=5):
+    
     dx = edges[:, 2] - edges[:, 0]  # x2 - x1
     dy = edges[:, 3] - edges[:, 1]  # y2 - y1
     
@@ -189,8 +189,7 @@ def remove_short_edges(edges,pred_logits, threshold=5):
     mask = dist_sq > threshold_sq
     
     filtered_edges = edges[mask]
-    pred_logits = pred_logits[mask]
-    return filtered_edges,pred_logits
+    return filtered_edges
 def is_parallel(vec1: np.ndarray, vec2: np.ndarray, angle_threshold: float = 5.0) -> np.ndarray:
     """改进的平行判断：结合方向向量夹角和距离阈值"""
     # 计算单位向量
@@ -210,20 +209,21 @@ def compute_intersections_matrix(edges, threshold=10):
     starts = edges[:,:2]
     ends = edges[:,2:]
     n = len(edges)
+
     # 计算相邻边间距
     next_starts = np.roll(starts, -1, axis=0)
     next_ends = np.roll(ends, -1, axis=0)
     dist_sq = np.sum((ends - next_starts) ** 2, axis=1)
     mask = dist_sq <= threshold ** 2
     if ~mask[-1]:
-        mask[-1] = True
+        mask[-1] = True    
 
 
     # 提取需要计算的边对
-    A = starts  # 前一条边的起点
-    B = ends # 前一条边的终点
-    C = next_starts # 后一条边的起点
-    D = next_ends  # 后一条边的终点
+    A = starts[mask]  # 前一条边的起点
+    B = ends[mask]  # 前一条边的终点
+    C = next_starts[mask]  # 后一条边的起点
+    D = next_ends[mask]  # 后一条边的终点
 
     # 向量计算
     AB = B - A
@@ -241,28 +241,8 @@ def compute_intersections_matrix(edges, threshold=10):
     s = (AB[:, 1] * AC[:, 0] - AB[:, 0] * AC[:, 1]) / (det + 1e-6)
     # 计算交点坐标
     intersections = A + t[:, None] * AB
-
-    #valid = valid  & (t >= 0) & (t <= 1.5) & (s >= -1e6) & (s <= 1e6) &(~parallel_mask)  # 限制合理范围
-    valid_both=valid & (t>=0) & (t<=1) & (s>=0) & (s<=1) & ( ~parallel_mask)
-    valid_first=valid & (t>=0) & (t<=1) & ((s<0)|(s>1))&(~parallel_mask)
-    valid_second=valid &((t<0)|(t>1))&(s>=0)&(s<=1)&(~parallel_mask)
-    valid_out=valid &((t<0)|(t>1))&((s<0)|(s>1))&(~parallel_mask)
-
-    for i,useful in enumerate(valid_both):
-        if useful:
-            mask[i] = True
-    for i,useful in enumerate(valid_first):
-        if useful:
-            mask[i] = True
-    for i,useful in enumerate(valid_second):
-        if useful:
-            mask[i] = True
-    for i,useful in enumerate(valid_out):
-        if useful:
-            mask[i] = True
-
-
-    return mask, intersections, valid, valid_both, valid_first, valid_second, valid_out
+    valid = valid  & (t >= 0) & (t <= 1.5) & (s >= -1e6) & (s <= 1e6) &(~parallel_mask)  # 限制合理范围
+    return mask, intersections, valid
 
 def remove_multi_polygon(polygon_lst):
     for poly_idx, polygon in enumerate(polygon_lst):
@@ -373,104 +353,22 @@ def remove_multi_polygon(polygon_lst):
         assert polygon.geom_type == 'Polygon'
     return polygon_lst
 
-def delete_duplicate_edges_by_logits(edges, pred_logits, angle_thresh_deg=5.0, dist_thresh=5.0,  overlap_thresh=0.05):
-
-    p1 = edges[:, :2]
-    p2 = edges[:, 2:]
-    v = p2 - p1
-    length = np.linalg.norm(v, axis=1, keepdims=True)
-    v_unit = v / (length + 1e-8)
-
-    #角度
-    cos_sim = v_unit @ v_unit.T
-    angle_thresh = np.cos(np.deg2rad(angle_thresh_deg))
-    dir_mask = (cos_sim > angle_thresh)
-
-    #距离
-    p1_i, p2_i = p1[:, None, :], p2[:, None, :]
-    q1_j, q2_j = p1[None, :, :], p2[None, :, :]
-
-    d1 = np.linalg.norm(p1_i - q1_j, axis=-1)
-    d2 = np.linalg.norm(p1_i - q2_j, axis=-1)
-    d3 = np.linalg.norm(p2_i - q1_j, axis=-1)
-    d4 = np.linalg.norm(p2_i - q2_j, axis=-1)
-
-    min_dist = np.minimum.reduce([d1, d2, d3, d4])
-    dist_mask = (min_dist < dist_thresh)
-
-    # 投影重叠判断
-    axis = v_unit
-    proj1 = np.dot(p1, axis.T)
-    proj2 = np.dot(p2, axis.T)
-    proj_min = np.minimum(proj1[:, :, None], proj2[:, :, None])
-    proj_max = np.maximum(proj1[:, :, None], proj2[:, :, None])
-    inter = np.maximum(0, np.minimum(proj_max, proj_max.transpose((1, 0, 2))) - np.maximum(proj_min, proj_min.transpose((1, 0, 2))))
-    union = np.maximum(proj_max, proj_max.transpose((1, 0, 2))) - np.minimum(proj_min, proj_min.transpose((1, 0, 2)))
-    overlap = inter / (union + 1e-8)
-    proj_mask = (overlap.squeeze(-1) > overlap_thresh) & (min_dist<=5)
-
-    # 综合判断重复
-    duplicate_mask = dir_mask & ( proj_mask)
-    dupe_idx = np.transpose(np.triu(duplicate_mask, k=1).nonzero())
-    #不处理相邻边？
-    # i_idx, j_idx = np.triu_indices(len(edges), k=1)
-    # num_edges = len(edges)
-    # neighbor_mask = (np.abs(i_idx - j_idx) <= 1) | \
-    #              ((i_idx == 0) & (j_idx == num_edges - 1)) | \
-    #              ((j_idx == 0) & (i_idx == num_edges - 1))
-    # full_mask = duplicate_mask[i_idx, j_idx] & (~neighbor_mask)
-    # dupe_idx = np.stack([i_idx[full_mask], j_idx[full_mask]], axis=1)
-
-    # logits_i = pred_logits[dupe_idx[:, 0]]
-    # logits_j = pred_logits[dupe_idx[:, 1]]
-    # keep_i = logits_i >= logits_j  # 保留 i，则删除 j
-    # to_remove = np.concatenate([
-    #     dupe_idx[keep_i, 1],
-    #     dupe_idx[~keep_i, 0]
-    # ])
-    # remove_idx = np.unique(to_remove)
-    # keep_idx = np.setdiff1d(np.arange(len(edges)), remove_idx)
-    # # dupe_idx = np.stack([i_idx[full_mask], j_idx[full_mask]], axis=1)
-    # # print(dupe_idx)
-
-    if dupe_idx.shape[0] == 0:
-        return edges  # 无重复
-
-    # # 按 pred_logits 去重（向量化）
-    i_idx = dupe_idx[:, 0]
-    j_idx = dupe_idx[:, 1]
-    keep_i = pred_logits[i_idx] >= pred_logits[j_idx]
-    keep_j = ~keep_i
-
-    remove_idx = np.unique(np.concatenate([
-        j_idx[keep_i],
-        i_idx[keep_j]
-    ]))
-
-
-    # 计算保留索引
-    all_idx = np.arange(len(edges))
-    keep_idx = np.setdiff1d(all_idx, remove_idx)
-    print("删除重复边",dupe_idx,keep_i,keep_idx,remove_idx)
-    return edges[keep_idx,:]
-def get_corners_from_edges(edges,pred_logits, threshold=10):
+def get_corners_from_edges(edges, threshold=10):
     """ 多边形边优化主函数 """
     if len(edges) < 3:
         return edges
     
-    # keep_mask = detect_duplicate_edges(edges, 5, 5)
-    filtered_edges = delete_duplicate_edges_by_logits(edges,pred_logits)#[keep_mask]
+    keep_mask = detect_duplicate_edges(edges, 5, 5)
+    filtered_edges = edges#[keep_mask]
+    # filtered_edges = edges
+    # # 第二步：重新闭合多边形
+    # if len(filtered_edges) >= 3:
+    #     last_point = filtered_edges[-1, 2:]
+    #     first_point = filtered_edges[0, :2]
+    #     if np.linalg.norm(last_point - first_point) > 1e-6:
+    #         filtered_edges[-1, 2:] = first_point
     # 第一步：计算所有需要合并的边对
-    mask, intersections, valid, valid_both, valid_first, valid_second, valid_out= compute_intersections_matrix(filtered_edges,threshold)
-
-    # 根据mask筛选参数：仅保留mask为True的项
-    valid = valid[mask]
-    intersections = intersections[mask]
-    valid_both = valid_both[mask]
-    valid_first = valid_first[mask]
-    valid_second = valid_second[mask]
-    valid_out = valid_out[mask]
-
+    mask, intersections, valid = compute_intersections_matrix(filtered_edges, threshold)
     valid_indices = np.where(mask)[0]
     index_map = {orig_idx: arr_idx for arr_idx, orig_idx in enumerate(valid_indices)}
 
@@ -485,49 +383,8 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
         if mask[i]:
             # 通过映射表找到valid中的位置
             arr_idx = index_map.get(i, -1)
-           
             if arr_idx != -1 and valid[arr_idx]:
-                #计算距离
-                dist_to_end = np.linalg.norm(intersections[arr_idx] - current_end)
-                dist_to_start = np.linalg.norm(intersections[arr_idx] - next_start)
-                dist_corners = np.linalg.norm(current_end - next_start)
-                avg_dist_to_corners = (dist_to_end + dist_to_start)/2 #np.sqrt(dist_to_end**2 + dist_to_start**2) 
-                if valid_both[arr_idx]:
-                    corners.append(intersections[arr_idx])
-                elif valid_first[arr_idx] or valid_second[arr_idx]:
-                    current_start = filtered_edges[i, 0:2]
-                    next_end = filtered_edges[(i + 1) % n, 2:]
-
-                    v1 = current_end - current_start
-                    v2 = next_end - next_start
-
-                    dot = np.dot(v1, v2)
-
-                    # 如果点积 < 0，则夹角 > 90°
-                    angle_90 = dot < 0
-                    if (dist_corners <= avg_dist_to_corners):
-                        if not corners or tuple(corners[-1]) != tuple(current_end):
-                            corners.append(current_end)
-                        if tuple(next_start) != tuple(current_end):
-                            corners.append(next_start)
-                    else:
-                        corners.append(intersections[arr_idx])
-                        # if tuple(next_start) != tuple(intersections[arr_idx]):
-                        #     corners.append(next_start)
-                elif valid_out[arr_idx]:
-                    if dist_to_end<=2.5 and dist_to_start<=2.5:
-                        corners.append(intersections[arr_idx])
-                    else:
-                        if not corners or tuple(corners[-1]) != tuple(current_end):
-                            corners.append(current_end)
-                        if tuple(next_start) != tuple(current_end):
-                            corners.append(next_start)
-                else:
-                    # 否则添加当前终点和下个起点
-                    if not corners or tuple(corners[-1]) != tuple(current_end):
-                        corners.append(current_end)
-                    if tuple(next_start) != tuple(current_end):
-                        corners.append(next_start)
+                corners.append(intersections[arr_idx])
             else:
                 # 否则添加当前终点和下个起点
                 if not corners or tuple(corners[-1]) != tuple(current_end):
@@ -540,6 +397,8 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
                 corners.append(current_end)
             if tuple(next_start) != tuple(current_end):
                 corners.append(next_start)
+
+
 
     corners = np.array(corners)
 
