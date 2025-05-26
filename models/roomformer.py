@@ -46,7 +46,6 @@ class RoomFormer(nn.Module):
         #表示两个端点
         self.coords_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         
-        self.linesegs_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.num_feature_levels = num_feature_levels
         # dn label enc
         self.num_classes = num_classes
@@ -60,6 +59,7 @@ class RoomFormer(nn.Module):
             input_proj_list = []
             for _ in range(num_backbone_outs):
                 in_channels = backbone.num_channels[_]
+            
                 
                 input_proj_list.append(nn.Sequential(
                     nn.Conv2d(in_channels, hidden_dim, kernel_size=1),
@@ -100,25 +100,16 @@ class RoomFormer(nn.Module):
             self.class_embed = _get_clones(self.class_embed, num_pred)
             self.coords_embed = _get_clones(self.coords_embed, num_pred)
             nn.init.constant_(self.coords_embed[0].layers[-1].bias.data[2:], -2.0)
-            #------------------------------
-            if use_encoder:
-                self.linesegs_embed = _get_clones(self.linesegs_embed, num_pred)
-                nn.init.constant_(self.linesegs_embed[0].layers[-1].bias.data[2:], -2.0)
-            # hack implementation for iterative bounding box refinement
-            #------------------------------/
+
         else:
             nn.init.constant_(self.coords_embed.layers[-1].bias.data[2:], -2.0)
             self.class_embed = nn.ModuleList([self.class_embed for _ in range(num_pred)])
             self.coords_embed = nn.ModuleList([self.coords_embed for _ in range(num_pred)])
-            if use_encoder:
-                self.linesegs_embed = nn.ModuleList([self.linesegs_embed for _ in range(num_pred)])
+        
 
         self.transformer.decoder.coords_embed = self.coords_embed
         self.transformer.decoder.class_embed = self.class_embed
-        if use_encoder:
-            self.transformer.decoder.linesegs_embed = self.linesegs_embed
-            for lineseg_embed in self.linesegs_embed:
-                nn.init.constant_(lineseg_embed.layers[-1].bias.data[2:], 0.0)
+  
         
         # Semantically-rich floorplan
         self.room_class_embed = None

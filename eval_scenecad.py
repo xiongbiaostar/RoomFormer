@@ -21,7 +21,7 @@ def get_args_parser():
 
     # backbone
     parser.add_argument('--backbone', default='swinv2_L_192_22k', type=str,
-                        help="Name of the convolutional backbone to use")#swin_L_384_22k
+                        help="Name of the convolutional backbone to use")#swinv2_L_192_22kswin_L_384_22k
     parser.add_argument('--lr_backbone', default=0, type=float)
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -70,25 +70,22 @@ def get_args_parser():
                         help="Disables auxiliary decoding losses (loss at each layer)")
 
     # dataset parameters
-    parser.add_argument('--dataset_name', default='stru3d')
-    parser.add_argument('--dataset_root', default='data/stru3d', type=str)
-    parser.add_argument('--eval_set', default='test', type=str)
+    parser.add_argument('--dataset_name', default='scenecad')
+    parser.add_argument('--dataset_root', default='/home/lyy/edge/data/scenecad', type=str)
+    parser.add_argument('--eval_set', default='val', type=str)
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth  /home/lyy/edge/output/2025-03-29-10-23-36_edge_dn/checkpoint0619.pth
-    parser.add_argument('--checkpoint', default='', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
-
-    parser.add_argument('--output_dir', default='eval_stru3d',
-
+    parser.add_argument('--checkpoint', default='/home/lyy/edge/output/2025-04-18-17-16-37_edge_dn_swinv2ceweight1_coord6_raster1/checkpoint0359.pth', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
+    parser.add_argument('--output_dir', default='eval_scenecad',
                         help='path where to save result')
-    parser.add_argument('--use_angle_loss',default=True,type=bool)
 
     # visualization options
     parser.add_argument('--plot_pred', default=True, type=bool, help="plot predicted floorplan")
-    parser.add_argument('--plot_density', default=False, type=bool, help="plot predicited room polygons overlaid on the density map")
-    parser.add_argument('--plot_gt', default=False, type=bool, help="plot ground truth floorplan")
+    parser.add_argument('--plot_density', default=True, type=bool, help="plot predicited room polygons overlaid on the density map")
+    parser.add_argument('--plot_gt', default=True, type=bool, help="plot ground truth floorplan")
     parser.add_argument('--use_checkpoint', default=True, type=bool)
 
     return parser

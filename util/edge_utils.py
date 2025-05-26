@@ -179,8 +179,10 @@ def detect_duplicate_edges(edges: np.ndarray,
             else:
                 keep_mask[(i + 1) % n] = False
     return keep_mask
+
 def remove_short_edges(edges,pred_logits, threshold=5):
     # print(edges.shape)
+
     dx = edges[:, 2] - edges[:, 0]  # x2 - x1
     dy = edges[:, 3] - edges[:, 1]  # y2 - y1
     
@@ -243,10 +245,12 @@ def compute_intersections_matrix(edges, threshold=10):
     intersections = A + t[:, None] * AB
 
     #valid = valid  & (t >= 0) & (t <= 1.5) & (s >= -1e6) & (s <= 1e6) &(~parallel_mask)  # 限制合理范围
-    valid_both=valid & (t>=0) & (t<=1) & (s>=0) & (s<=1) & ( ~parallel_mask)
-    valid_first=valid & (t>=0) & (t<=1) & ((s<0)|(s>1))&(~parallel_mask)
-    valid_second=valid &((t<0)|(t>1))&(s>=0)&(s<=1)&(~parallel_mask)
-    valid_out=valid &((t<0)|(t>1))&((s<0)|(s>1))&(~parallel_mask)
+
+    valid_both=valid & (t>=0) & (t<=1.7) & (s>=0) & (s<=1.7) & ( ~parallel_mask)
+    valid_first=valid & (t>=0) & (t<=1.7) & ((s<0)|(s>1.7))&(~parallel_mask)
+    valid_second=valid &((t<0)|(t>1.7))&(s>=0)&(s<=1.7)&(~parallel_mask)
+    valid_out=valid &((t<0)|(t>1.7))&((s<0)|(s>1.7))&(~parallel_mask)
+
 
     for i,useful in enumerate(valid_both):
         if useful:
@@ -460,6 +464,7 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
     
     # keep_mask = detect_duplicate_edges(edges, 5, 5)
     filtered_edges = delete_duplicate_edges_by_logits(edges,pred_logits)#[keep_mask]
+
     # 第一步：计算所有需要合并的边对
     mask, intersections, valid, valid_both, valid_first, valid_second, valid_out= compute_intersections_matrix(filtered_edges,threshold)
 
@@ -481,6 +486,7 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
         current_end = filtered_edges[i, 2:]
         next_start = filtered_edges[(i + 1) % n, :2]
 
+
         # 当满足合并条件时添加交点
         if mask[i]:
             # 通过映射表找到valid中的位置
@@ -491,31 +497,25 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
                 dist_to_end = np.linalg.norm(intersections[arr_idx] - current_end)
                 dist_to_start = np.linalg.norm(intersections[arr_idx] - next_start)
                 dist_corners = np.linalg.norm(current_end - next_start)
-                avg_dist_to_corners = (dist_to_end + dist_to_start)/2 #np.sqrt(dist_to_end**2 + dist_to_start**2) 
+
+                avg_dist_to_corners = (dist_to_end + dist_to_start) / 2
                 if valid_both[arr_idx]:
                     corners.append(intersections[arr_idx])
                 elif valid_first[arr_idx] or valid_second[arr_idx]:
-                    current_start = filtered_edges[i, 0:2]
-                    next_end = filtered_edges[(i + 1) % n, 2:]
+                    if dist_corners <= avg_dist_to_corners:
 
-                    v1 = current_end - current_start
-                    v2 = next_end - next_start
-
-                    dot = np.dot(v1, v2)
-
-                    # 如果点积 < 0，则夹角 > 90°
-                    angle_90 = dot < 0
-                    if (dist_corners <= avg_dist_to_corners):
                         if not corners or tuple(corners[-1]) != tuple(current_end):
                             corners.append(current_end)
                         if tuple(next_start) != tuple(current_end):
                             corners.append(next_start)
                     else:
                         corners.append(intersections[arr_idx])
+
                         # if tuple(next_start) != tuple(intersections[arr_idx]):
                         #     corners.append(next_start)
                 elif valid_out[arr_idx]:
                     if dist_to_end<=2.5 and dist_to_start<=2.5:
+
                         corners.append(intersections[arr_idx])
                     else:
                         if not corners or tuple(corners[-1]) != tuple(current_end):

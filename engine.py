@@ -81,7 +81,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
+
 def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
+
     model.eval()
     criterion.eval()
     output_dir = "val_prediction_coco_new"
@@ -333,6 +335,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     gt_sem_rich_path = os.path.join(output_dir, '{}_sem_rich_gt.png'.format(scene_ids[i]))
                     plot_semantic_rich_floorplan(gt_sem_rich, gt_sem_rich_path, prec=1, rec=1) 
 
+
         start_time = time.time()
         outputs,_ = model(samples)
         end_time = time.time()
@@ -343,6 +346,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
         pred_corners = outputs['pred_coords']
         pred_logits = torch.sigmoid(pred_logits)
         fg_mask = pred_logits > 0.5 # select valid corners
+
         if 'pred_room_logits' in outputs:
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
             _, pred_room_label = prob[..., :-1].max(-1)
@@ -394,6 +398,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                         corners = remove_short_edges(corners,pred_logits_per_room)
                         # print("移除短边",corners.shape)
                         
+
 
                         corners = get_corners_from_edges(corners,pred_logits_per_room)#get_polygon_vertices_matrix(edges)
                         corners = remove_duplicate_corners(corners)
@@ -551,6 +556,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
     print("*************************************************")
     avg_time = sum(time_all) / len(time_all)
     print(f"Average inference time: {avg_time:.2f} ms")
+
     with open(os.path.join(output_dir, 'results.txt'), 'w') as file:
         file.write(json.dumps(quant_result_dict))
 def return_inter(scene_id, output_class, outputs_coord, total_results):
