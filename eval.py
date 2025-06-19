@@ -20,7 +20,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int)
 
     # backbone
-    parser.add_argument('--backbone', default='swinv2_L_192_22k', type=str,
+    parser.add_argument('--backbone', default='resnet50', type=str,
                         help="Name of the convolutional backbone to use")#swin_L_384_22k
     parser.add_argument('--lr_backbone', default=0, type=float)
     parser.add_argument('--dilation', action='store_true',
@@ -44,9 +44,9 @@ def get_args_parser():
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_queries', default=800, type=int,
+    parser.add_argument('--num_queries', default=2800, type=int,
                         help="Number of query slots (num_polys * max. number of corner per poly)")
-    parser.add_argument('--num_polys', default=20, type=int,
+    parser.add_argument('--num_polys', default=70, type=int,
                         help="Number of maximum number of room polygons")
     parser.add_argument('--dec_n_points', default=4, type=int)
     parser.add_argument('--enc_n_points', default=4, type=int)
@@ -60,7 +60,7 @@ def get_args_parser():
                         help="iteratively refine reference points (i.e. positional part of polygon queries)")
     parser.add_argument('--masked_attn', default=False, action='store_true',
                         help="if true, the query in one room will not be allowed to attend other room")
-    parser.add_argument('--semantic_classes', default=-1, type=int,
+    parser.add_argument('--semantic_classes', default=4, type=int,
                         help="Number of classes for semantically-rich floorplan:  \
                         1. default -1 means non-semantic floorplan \
                         2. 19 for Structured3D: 16 room types + 1 door + 1 window + 1 empty")
@@ -73,14 +73,13 @@ def get_args_parser():
     parser.add_argument('--dataset_name', default='stru3d')
     parser.add_argument('--dataset_root', default='data/stru3d', type=str)
     parser.add_argument('--eval_set', default='test', type=str)
-
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--num_workers', default=2, type=int)
     parser.add_argument('--seed', default=42, type=int)#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth  /home/lyy/edge/output/2025-03-29-10-23-36_edge_dn/checkpoint0619.pth
-    parser.add_argument('--checkpoint', default='', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
+    parser.add_argument('--checkpoint', default='/home/lyy/edge_full/output/2025-06-17-21-47-36_door/checkpoint.pth', help='resume from checkpoint')#/home/lyy/edge/output/2025-03-24-15-49-32_edge_dn/checkpoint0639.pth
 
-    parser.add_argument('--output_dir', default='eval_stru3d',
+    parser.add_argument('--output_dir', default='door',
 
                         help='path where to save result')
     parser.add_argument('--use_angle_loss',default=True,type=bool)
@@ -88,7 +87,7 @@ def get_args_parser():
     # visualization options
     parser.add_argument('--plot_pred', default=True, type=bool, help="plot predicted floorplan")
     parser.add_argument('--plot_density', default=False, type=bool, help="plot predicited room polygons overlaid on the density map")
-    parser.add_argument('--plot_gt', default=False, type=bool, help="plot ground truth floorplan")
+    parser.add_argument('--plot_gt', default=True, type=bool, help="plot ground truth floorplan")
     parser.add_argument('--use_checkpoint', default=True, type=bool)
 
     return parser

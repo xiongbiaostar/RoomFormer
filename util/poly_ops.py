@@ -123,16 +123,19 @@ def pad_gt_polys_to_edges(gt_instances, num_queries_per_poly, device):
             num_corners = len(corners) // 2
             corners = corners.view(num_corners, 2)
             edges = torch.zeros((num_corners, 2, 2))
- 
-            for i in range(num_corners):
-                next_index = (i + 1) % num_corners
-                edge_start = corners[i]
-                edge_end = corners[next_index]
-                edges[i] = torch.stack([edge_start, edge_end])
-            
-            edges = edges.view(-1).to(device)#[num_points]
-            
+            if num_corners>2:
+                
+                for i in range(num_corners):
+                    next_index = (i + 1) % num_corners
+                    edge_start = corners[i]
+                    edge_end = corners[next_index]
+                    edges[i] = torch.stack([edge_start, edge_end])
+                
+                edges = edges.view(-1).to(device)#[num_points]
+            else:
+                edges = corners.view(-1).to(device)
             corner_lengths.append(len(edges))
+            
 
             edges_pad = torch.zeros(num_queries_per_poly*4, device=device)
             edges_pad[:len(edges)] = edges #[160]160=40*4
@@ -142,12 +145,15 @@ def pad_gt_polys_to_edges(gt_instances, num_queries_per_poly, device):
             labels_pad[:len(labels)] = labels #[40]
             room_corners.append(edges_pad)
             corner_labels.append(labels_pad)
-
+        room_labels = gt_inst.gt_classes.clone()
+        room_labels[room_labels <= 15] = 0
+        room_labels[room_labels == 16] = 1
+        room_labels[room_labels == 17] = 2
         room_dict = {
             'coords': torch.stack(room_corners), #[num_polys,160]
             'labels': torch.stack(corner_labels),#[num_polys,40]
             'lengths': torch.tensor(corner_lengths, device=device),#[num_polys]
-            'room_labels': gt_inst.gt_classes
+            'room_labels': room_labels
         }
         room_targets.append(room_dict)
 
@@ -171,17 +177,20 @@ def get_gt_polys(gt_instances, num_queries_per_poly, device):
             num_corners = len(corners) // 2
             corners = corners.view(num_corners, 2)
             edges = torch.zeros((num_corners, 2, 2))
- 
-            for i in range(num_corners):
-                next_index = (i + 1) % num_corners
-                edge_start = corners[i]
-                edge_end = corners[next_index]
-                edges[i] = torch.stack([edge_start, edge_end])
-            
-            edges = edges.view(-1).to(device)
-            
+            if num_corners>2: 
+                for i in range(num_corners):
+                    next_index = (i + 1) % num_corners
+                    edge_start = corners[i]
+                    edge_end = corners[next_index]
+                    edges[i] = torch.stack([edge_start, edge_end])
+                
+                edges = edges.view(-1).to(device)
+                
+                
+            else:
+                edges = corners.view(-1).to(device)
             corner_lengths.append(len(edges))
-
+            
             # corners_pad = torch.zeros(num_queries_per_poly*4, device=device)
             # corners_pad[:len(edges)] = edges
 
@@ -190,12 +199,15 @@ def get_gt_polys(gt_instances, num_queries_per_poly, device):
             # labels_pad[:len(labels)] = labels
             room_corners.append(edges)
             corner_labels.append(labels)
-
+        room_labels = gt_inst.gt_classes.clone()
+        room_labels[room_labels <= 15] = 0
+        room_labels[room_labels == 16] = 1
+        room_labels[room_labels == 17] = 2
         room_dict = {
             'coords': torch.cat(room_corners), #[num_edges_of_a_batch*4]
             'labels': torch.cat(corner_labels), #[num_edges_of_a_batch]
             'lengths': torch.tensor(corner_lengths, device=device),
-            'room_labels': gt_inst.gt_classes
+            'room_labels': room_labels
         }
         room_targets.append(room_dict)
 

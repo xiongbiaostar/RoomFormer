@@ -197,7 +197,7 @@ class DeformableTransformer(nn.Module):
         # decoder
         hs, inter_references, inter_classes = self.decoder(tgt, reference_points, memory, src_flatten,
                                             spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten, tgt_masks)
-
+        # print("transformer输出",hs.shape,inter_references.shape)
         return hs, init_reference_out, inter_references, inter_classes
 
 
@@ -411,10 +411,10 @@ class DeformableTransformerDecoder(nn.Module):
                 intermediate.append(output)
                 intermediate_reference_points.append(reference_points)
                 intermediate_classes.append(point_classes)
+        # print("解码器里面",output.shape,reference_points.shape,point_classes.shape)
 
         if self.return_intermediate:
             return torch.stack(intermediate), torch.stack(intermediate_reference_points), torch.stack(intermediate_classes)
-
         return output, reference_points, point_classes
 
 

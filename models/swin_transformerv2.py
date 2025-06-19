@@ -608,9 +608,11 @@ class SwinTransformerV2(nn.Module):
             self.absolute_pos_embed.requires_grad = False
 
         if self.frozen_stages >= 2:
+            print("swinT",self.layers)
             self.pos_drop.eval()
             for i in range(0, self.frozen_stages - 1):
                 m = self.layers[i]
+                
                 m.eval()
                 for param in m.parameters():
                     param.requires_grad = False

@@ -21,7 +21,7 @@ from s3d_floorplan_eval.DataRW.wrong_annotatios import wrong_s3d_annotations_lis
 
 from scenecad_eval.Evaluator import Evaluator_SceneCAD
 from util.poly_ops import pad_gt_polys,pad_gt_polys_to_edges,get_gt_polys,get_polygon_vertices_matrix
-from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan,plot_room_map_with_edges,plot_floorplan_with_edges
+from util.plot_utils import plot_room_map, plot_score_map, plot_floorplan_with_regions, plot_semantic_rich_floorplan,plot_room_map_with_edges,plot_floorplan_with_edges,plot_door_window_with_edges
 from util.edge_utils import remove_short_edges,get_corners_from_edges,remove_duplicate_corners,merge_points,refine_rooms,remove_multi_polygon,remove_rooms_with_iou
 options = MCSSOptions()
 opts = options.parse()
@@ -139,7 +139,10 @@ def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
             _, pred_room_label = prob[..., :-1].max(-1)
 
+            mapping = torch.tensor([0, 16, 17])
 
+        
+            pred_room_label = mapping[pred_room_label.squeeze(-1)].unsqueeze(-1)
         # process per scene
         for i in range(bs):
 
@@ -151,7 +154,10 @@ def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
                 curr_data_rw = S3DRW(curr_opts, mode = "online_eval")
                 evaluator = Evaluator(curr_data_rw, curr_opts)
             elif dataset_name == 'scenecad':
-                gt_polys = [gt_instances[i].gt_masks.polygons[0][0].reshape(-1,2).astype(np.int)]
+                gt_polys = [
+                    np.array(polygon[0]).reshape(-1, 2).astype(int)
+                    for polygon in gt_instances[i].gt_masks.polygons
+                ]                
                 evaluator = Evaluator_SceneCAD()
             
             print("Running Evaluation for scene %s" % scene_ids[i])
@@ -181,15 +187,16 @@ def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
                     corners = (valid_corners_per_room * 255).cpu().numpy()
                     edges = corners
                     corners,filtered_pred_logits = remove_short_edges(corners,pred_logits_per_room)
+
                     corners = get_corners_from_edges(corners,filtered_pred_logits)#g
-                    
 
 
 
-                    corners = remove_duplicate_corners(corners)
+                    #corners = remove_duplicate_corners(corners)
                     corners = np.around(corners).astype(np.int32)
                     corners = merge_points(corners,2)#2.5
                     edges = np.around(edges).astype(np.int32)
+   
 
                     if not semantic_rich:
                         # only regular rooms
@@ -203,9 +210,14 @@ def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
                                 room_polys.append(corners)
                                 room_types.append(pred_room_label_per_scene[j])
                         # window / door
-                        elif len(corners)==2:
-                            window_doors.append(corners)
-                            window_doors_types.append(pred_room_label_per_scene[j])
+                        elif len(corners)==1:
+                            
+                            corners_wd=corners[0].reshape(-1,2)
+                            if corners_wd.shape[0]==2:
+                                window_doors.append(corners_wd)
+                                window_doors_types.append(pred_room_label_per_scene[j])
+
+                           
             overlap=False
             shapely_polygons = []
             for np_array in room_polys:
@@ -238,10 +250,10 @@ def evaluate(model, criterion, dataset_name, data_loader, device,epoch = None):
                 room_polys=room_polys
             
             
-            if epoch is not None and epoch%10 == 0:
-                process_and_write_scene(scene_id=scene_ids[i],room_poly=room_polys,pred_file_path=pred_file_path)          
-                append_corner_to_json(edge_json_path,scene_ids[i], room_edges)
-                append_corner_to_json(corner_json_path,scene_ids[i],room_polys)
+            # if epoch is not None and epoch%10 == 0:
+            #     process_and_write_scene(scene_id=scene_ids[i],room_poly=room_polys,pred_file_path=pred_file_path)          
+            #     append_corner_to_json(edge_json_path,scene_ids[i], room_edges)
+            #     append_corner_to_json(corner_json_path,scene_ids[i],room_polys)
 
      
             
@@ -347,9 +359,15 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
         pred_logits = torch.sigmoid(pred_logits)
         fg_mask = pred_logits > 0.5 # select valid corners
 
+
         if 'pred_room_logits' in outputs:
             prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
             _, pred_room_label = prob[..., :-1].max(-1)
+            
+            mapping = torch.tensor([0, 16, 17])
+
+        
+            pred_room_label = mapping[pred_room_label.squeeze(-1)]
 
         # process per scene
         for i in range(pred_logits.shape[0]):
@@ -362,7 +380,10 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                 curr_data_rw = S3DRW(curr_opts, mode = "test")
                 evaluator = Evaluator(curr_data_rw, curr_opts)
             elif dataset_name == 'scenecad':
-                gt_polys = [gt_instances[i].gt_masks.polygons[0][0].reshape(-1,2).astype(np.int)]
+                gt_polys = [
+                    np.array(polygon[0]).reshape(-1, 2).astype(int)
+                    for polygon in gt_instances[i].gt_masks.polygons
+                ]                  
                 evaluator = Evaluator_SceneCAD()
 
             print("Running Evaluation for scene %s" % scene_ids[i])
@@ -372,6 +393,8 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
             pred_corners_per_scene = pred_corners[i]
             room_polys = []
             room_edges = []
+            window_edges = []
+            door_edges = []
             room_edge_lengths=[]
 
             if semantic_rich:
@@ -395,13 +418,13 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     if len(valid_corners_per_room)>0:
                         corners = (valid_corners_per_room * 255).cpu().numpy()
                         edges = corners
-                        corners = remove_short_edges(corners,pred_logits_per_room)
+                        corners,pred_logits_per_room = remove_short_edges(corners,pred_logits_per_room)
                         # print("移除短边",corners.shape)
                         
 
 
                         corners = get_corners_from_edges(corners,pred_logits_per_room)#get_polygon_vertices_matrix(edges)
-                        corners = remove_duplicate_corners(corners)
+                        # corners = remove_duplicate_corners(corners)
                         corners = np.around(corners).astype(np.int32)
                         corners = merge_points(corners,2)#2.5
                         edges = np.around(edges).astype(np.int32)
@@ -423,10 +446,16 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                                     room_polys.append(corners)
 
                                     room_types.append(pred_room_label_per_scene[j])
+                                    room_edges.append(edges)
                             # window / door
-                            elif len(corners)==2:
-                                window_doors.append(corners)
+                            elif len(corners)==1:
+                                window_doors.append(corners[0].reshape(-1,2))
+                                print(corners)
                                 window_doors_types.append(pred_room_label_per_scene[j])
+                                if pred_room_label_per_scene[j] ==1:
+                                    door_edges.append(edges)
+                                else:
+                                    window_edges.append(edges)
             # if scene_ids[0] in [3493]:
             #     print(scene_ids,room_edges,pred_corners_per_room)
             overlap=False
@@ -514,7 +543,8 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
             room_edges = [np.array(r) for r in room_edges]
             density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
             edge_map = plot_floorplan_with_edges(room_edges, scale=1000,density_map = density_map)
-
+            if semantic_rich:
+                edge_map = plot_door_window_with_edges(edge_map,door_edges,window_edges)
             cv2.imwrite(os.path.join(output_dir, '{}_pred_edge.png'.format(scene_ids[i])), edge_map)
             density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
             density_map = np.repeat(density_map, 3, axis=2)

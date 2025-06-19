@@ -129,7 +129,25 @@ GREEN = '#339933'
 RED = '#ff3333'
 BLACK = '#000000'
 
+def plot_door_window_with_edges(image,door_edges,window_edges):
+    door_edges = [(door_edge * 1000 / 256).round().astype(np.int) for door_edge in door_edges]
+    window_edges = [(window_edge * 1000 / 256).round().astype(np.int) for window_edge in window_edges]
+    for edge in door_edges:
+        pt1 = (edge[0][0],edge[0][1])  # (x1, y1)
 
+        pt2 = (edge[0][2],edge[0][3])  # (x2, y2)
+
+        cv2.line(image, pt1, pt2, (255,0,0), thickness=4)
+        print("油门")
+
+    for edge in window_edges:
+        pt1 = (edge[0][0],edge[0][1])  # (x1, y1)
+
+        pt2 = (edge[0][2],edge[0][3])  # (x2, y2)
+        cv2.line(image, pt1, pt2, (0,0,0), thickness=4)
+        print("有窗")
+
+    return image
 def plot_floorplan_with_edges(regions, corners=None, edges=None, scale=256,density_map = None):
     """Draw floorplan map where different colors indicate different rooms
     """

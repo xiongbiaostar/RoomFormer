@@ -25,7 +25,7 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=2e-5, type=float)
     parser.add_argument('--lr_linear_proj_names', default=['sampling_offsets'], type=str, nargs='+')
     parser.add_argument('--lr_linear_proj_mult', default=0.1, type=float)
-    parser.add_argument('--batch_size', default=10, type=int)
+    parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=650, type=int)
     parser.add_argument('--lr_drop', default=[520], type=list)#520
@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--sgd', action='store_true')
 
     # backbone
-    parser.add_argument('--backbone', default='swinv2_L_192_22k', type=str,#resnet50swinv2_L_192_22kswin_L_384_22k
+    parser.add_argument('--backbone', default='resnet50', type=str,#resnet50 swinv2_L_192_22k swin_L_384_22k
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -58,10 +58,10 @@ def get_args_parser():
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_queries', default=800, type=int,
-                        help="Number of query slots (num_polys * max. number of corner per poly)")
-    parser.add_argument('--num_polys', default=20, type=int,
-                        help="Number of maximum number of room polygons")
+    parser.add_argument('--num_queries', default=2800, type=int,
+                        help="Number of query slots (num_polys * max. number of corner per poly)")#semantic 2800
+    parser.add_argument('--num_polys', default=70, type=int,
+                        help="Number of maximum number of room polygons") #semantic 70
     parser.add_argument('--dec_n_points', default=4, type=int)
     parser.add_argument('--enc_n_points', default=4, type=int)
     parser.add_argument('--query_pos_type', default='sine', type=str, choices=('static', 'sine', 'none'),
@@ -73,10 +73,10 @@ def get_args_parser():
                         help="iteratively refine reference points (i.e. positional part of polygon queries)")
     parser.add_argument('--masked_attn', default=False, action='store_true',
                         help="if true, the query in one room will not be allowed to attend other room")
-    parser.add_argument('--semantic_classes', default=-1, type=int,
+    parser.add_argument('--semantic_classes', default=4, type=int,
                         help="Number of classes for semantically-rich floorplan:  \
                         1. default -1 means non-semantic floorplan \
-                        2. 19 for Structured3D: 16 room types + 1 door + 1 window + 1 empty")
+                        2. 19 for Structured3D: 16 room types + 1 door + 1 window + 1 empty")#4
 
     # loss
     parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_true',
@@ -104,11 +104,12 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/home/lyy/edge/output/2025-04-12-22-22-30_edge_dn_swinv2ceweight0.6_coord6/checkpoint0559.pth', help='resume from checkpoint')
+    parser.add_argument('--pretrained', default='', help='resume from checkpoint')#
+    parser.add_argument('--resume', default='', help='resume from checkpoint')#/home/lyy/edge_full/output/2025-06-10-11-33-38_windowdoor/checkpoint.pth
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--job_name', default='edge_dn_angle_0.5', type=str)
+    parser.add_argument('--job_name', default='door', type=str)
     parser.add_argument('--use_dn', action="store_true",
                         help="use denoising training.")
     parser.add_argument('--scalar', default=5, type=int,
@@ -211,6 +212,9 @@ def main(args):
 
 
     output_dir = Path(args.output_dir)
+    if args.pretrained:
+        checkpoint = torch.load(args.pretrained, map_location='cpu')
+        model.load_state_dict(checkpoint['model'], strict=False)
     if args.resume:
         checkpoint = torch.load(args.resume, map_location='cpu')
         missing_keys, unexpected_keys = model.load_state_dict(checkpoint['model'], strict=False)
@@ -221,6 +225,10 @@ def main(args):
             print('Unexpected Keys: {}'.format(unexpected_keys))
         if 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             import copy
+            print("current param group count:", len(optimizer.param_groups))
+
+            print("optimizer param group count:", len(checkpoint['optimizer']['param_groups']))
+
             p_groups = copy.deepcopy(optimizer.param_groups)
             optimizer.load_state_dict(checkpoint['optimizer'])
             for pg, pg_old in zip(optimizer.param_groups, p_groups):
@@ -251,6 +259,8 @@ def main(args):
     print("Start training")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm,args=args)
         lr_scheduler.step()
@@ -316,11 +326,20 @@ def main(args):
             val_log_dict["val_metrics/room_sem_rec"] = test_stats['room_sem_rec']
             val_log_dict["val_metrics/window_door_prec"] = test_stats['window_door_prec']
             val_log_dict["val_metrics/window_door_rec"] = test_stats['window_door_rec']
-
+            tensorboardwriter.add_scalar('validation metrics/room_sem_prec', val_log_dict["val_metrics/room_sem_prec"], epoch)
+            tensorboardwriter.add_scalar('validation metrics/room_sem_rec', val_log_dict["val_metrics/room_sem_rec"], epoch)
+            tensorboardwriter.add_scalar('validation metrics/window_door_prec', val_log_dict["val_metrics/window_door_prec"], epoch)
+            tensorboardwriter.add_scalar('validation metrics/window_door_rec', val_log_dict["val_metrics/window_door_rec"], epoch)
+            tensorboardwriter.add_scalar('validation loss/loss_ce_room', val_log_dict["val/loss_ce_room"], epoch)
+            tensorboardwriter.add_scalar('training loss/loss_ce_room', train_log_dict["train/loss_ce_room"], epoch)
         else:
             # only apply the rasterization loss for non-semantic floorplans
             train_log_dict["train/loss_raster"] = train_stats['loss_raster']
             val_log_dict["val/loss_raster"] =  test_stats['loss_raster']
+            tensorboardwriter.add_scalar('training loss/loss_raster', train_log_dict["train/loss_raster"], epoch)
+            tensorboardwriter.add_scalar('validation loss/loss_raster', val_log_dict["val/loss_raster"], epoch)
+
+
 
         if 'room_iou' in test_stats:
             val_log_dict["val_metrics/room_iou"] = test_stats['room_iou']
@@ -341,17 +360,15 @@ def main(args):
         tensorboardwriter.add_scalar('training loss/loss_ce', train_log_dict["train/loss_ce"], epoch)
 
         tensorboardwriter.add_scalar('training loss/loss_coords', train_log_dict["train/loss_coords"], epoch)
-        tensorboardwriter.add_scalar('training loss/loss_raster', train_log_dict["train/loss_raster"], epoch)
         tensorboardwriter.add_scalar('training loss/tgt_loss_ce', train_log_dict["train/tgt_loss_ce"], epoch)
         tensorboardwriter.add_scalar('training loss/tgt_loss_coords', train_log_dict["train/tgt_loss_coords"], epoch)
-        tensorboardwriter.add_scalar('training dn vs. matching/dn_loss',
-                                    train_log_dict["train/tgt_loss_ce"] + train_log_dict["train/tgt_loss_coords"], epoch)
-        tensorboardwriter.add_scalar('training dn vs. matching/matching_loss',
-                                    train_log_dict["train/loss_coords"] + train_log_dict["train/loss_ce"]+train_log_dict["train/loss_raster"], epoch)
+        # tensorboardwriter.add_scalar('training dn vs. matching/dn_loss',
+        #                              train_log_dict["train/tgt_loss_ce"] + train_log_dict["train/tgt_loss_coords"], epoch)
+        # tensorboardwriter.add_scalar('training dn vs. matching/matching_loss',
+        #                              train_log_dict["train/loss_coords"] + train_log_dict["train/loss_ce"]+train_log_dict["train/loss_raster"], epoch)
         tensorboardwriter.add_scalar('validation loss/loss', val_log_dict["val/loss"], epoch)
         tensorboardwriter.add_scalar('validation loss/loss_ce', val_log_dict["val/loss_ce"], epoch)
         tensorboardwriter.add_scalar('validation loss/loss_coords', val_log_dict["val/loss_coords"], epoch)
-        tensorboardwriter.add_scalar('validation loss/loss_raster', val_log_dict["val/loss_raster"], epoch)
         tensorboardwriter.add_scalar('validation metrics/room_prec', val_log_dict["val_metrics/room_prec"], epoch)
         tensorboardwriter.add_scalar('validation metrics/room_rec', val_log_dict["val_metrics/room_rec"], epoch)
         tensorboardwriter.add_scalar('validation metrics/corner_prec', val_log_dict["val_metrics/corner_prec"], epoch)

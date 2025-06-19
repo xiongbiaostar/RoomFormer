@@ -140,6 +140,7 @@ class Evaluator():
         ignore_mask_region = self.data_rw.gt_sample["wall_map"].cpu().numpy()[0, :, :, 0]
 
         img_size = (joint_room_map.shape[0], joint_room_map.shape[1])
+        # print("看看",window_door_lines)
         quant_result_dict = self.get_quantitative(
                                     gt_polys_list, 
                                     gt_polys_type_list, 
@@ -561,8 +562,10 @@ class Evaluator():
             result_dict['room_sem_prec'] = room_sem_metric_prec
             result_dict['room_sem_rec'] = room_sem_metric_rec
 
+
         if pred_window_doors_types is not None:
             result_dict['window_door_prec'] = window_door_metric_prec
             result_dict['window_door_rec'] = window_door_metric_rec
+            print("预测有效门窗/总预测门窗/真值门窗/",sum(pred2gt_exists_wd),float(len(pred_window_doors)),float(len(gt_window_doors)))
 
         return result_dict

@@ -22,7 +22,7 @@ from util.poly_ops import pad_gt_polys, get_gt_polys
 
 
 
-def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_queries, num_classes, hidden_dim, label_enc,num_query_per_poly=40,scene_ids=None):
+def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_queries, num_classes, hidden_dim, label_enc,num_query_per_poly=40,scene_ids=None,semantic_classes=-1):
     """
     The major difference from DN-DAB-DETR is that the author process pattern embedding pattern embedding in its detector
     forward function and use learnable tgt embedding, so we change this function a little bit.
@@ -137,6 +137,7 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
         known_coords_expand = known_coords.clone()
         #
 
+
         known_lengths = known_lengths.repeat(scalar,1).view(-1)
         # print("dn-components",coords.shape,known_coords.shape,known_coords_expand.shape,known_num,points_num_each_poly,known_indice.shape,unmask_label.shape,unmask_poly.shape,known_lengths,known_lengths.shape)
 
@@ -207,7 +208,6 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
             input_query_label[(known_bid.long(), map_known_indice)] = input_label_embed
             input_query_coords[(known_bid.long(), map_known_indice)] = input_coords_embed.float()
         # 需要修改检查！！！！！！！！！！
-        # TODO:用了二级查询，这个tgt_size可能有点问题！！！！！
         tgt_size = pad_size + num_queries  #1090
         # (i,j) = True 代表 i 不可見 j
         attn_mask = torch.ones(tgt_size, tgt_size).to('cuda') < 0
@@ -235,6 +235,11 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
             'pad_size': pad_size,
             "known_lengths":known_lengths
         }
+        if semantic_classes>0:
+            room_labels = torch.cat([t['room_labels'] for t in targets])
+            known_room_labels = room_labels.repeat(scalar, 1).view(-1)
+            mask_dict['known_room_labels'] = known_room_labels
+            print("room_labels",room_labels.shape,known_room_labels.shape,known_labels.shape,known_coords.shape)
     else:  # no dn for inference
         if tgt is not None and refpoint_emb is not None:
             input_query_label = tgt.repeat(batch_size, 1, 1)
@@ -251,12 +256,14 @@ def prepare_for_dn(dn_args, tgt_weight, embedweight, batch_size, training, num_q
     return input_query_label, input_query_coords, attn_mask, mask_dict
 
 
-def dn_post_process(outputs_class, outputs_coord, mask_dict):
+def dn_post_process(output,outputs_class, outputs_coord, mask_dict,semantic_classes=-1):
     """
     post process of dn after output from the transformer
     put the dn part in the mask_dict
     """
     if mask_dict and mask_dict['pad_size'] > 0:
+
+    
         output_known_class = outputs_class[:, :, :mask_dict['pad_size'], :]
         output_known_coord = outputs_coord[:, :, :mask_dict['pad_size'], :]
         outputs_class = outputs_class[:, :, mask_dict['pad_size']:, :]
@@ -265,7 +272,14 @@ def dn_post_process(outputs_class, outputs_coord, mask_dict):
         #output_known_class.shape=[6, 2, 290, 1], output_known_coord.shape=[6, 2, 290, 2], outputs_coord.shape=[6, 2, 800, 2], outputs_class.shape=[6, 2, 800, 1]
         mask_dict['output_known_lbs_polys']=(output_known_class,output_known_coord)
         # print("dn_post_process",outputs_class.shape, outputs_coord.shape,output_known_class.shape,output_known_coord.shape)
-    return outputs_class, outputs_coord
+        if semantic_classes>0:
+            output_known = output[:, :, :mask_dict['pad_size'], :]
+            outputs = output[:, :, mask_dict['pad_size']:, :]
+            mask_dict['output_known_room_labels']=output_known
+
+            return outputs,outputs_class, outputs_coord
+        
+    return output,outputs_class, outputs_coord
 
 
 def prepare_for_loss(mask_dict):
@@ -291,7 +305,12 @@ def prepare_for_loss(mask_dict):
         output_known_coord = output_known_coord.permute(1, 2, 0, 3)[(bid, map_known_indice)].permute(1, 0, 2)
     num_tgt = known_indice.numel() #计算known_indice中元素总数
     # print("prepare for loss",num_tgt, known_lengths)#loss 380 [tensor([ 8, 20,  8], device='cuda:0'), tensor([ 8, 20, 12,  8,  8,  8, 12, 12, 12, 16], device='c
-    return known_labels, known_polys, output_known_class, output_known_coord, known_lengths
+    # if 'output_known_room_labels' in mask_dict:
+    #     known_room_labels = mask_dict["known_room_labels"]
+    #     output_known_room_labels = mask_dict['output_known_room_labels']
+    #     print("去噪内部",known_room_labels.shape,output_known_room_labels.shape)
+    #     return known_labels, known_polys, output_known_class, output_known_coord, known_lengths,output_known_room_labels,known_room_labels
+    return known_labels, known_polys, output_known_class, output_known_coord, known_lengths,None,None
 
 
 def tgt_loss_polys(src_polys, tgt_polys,target_len,angle):
@@ -336,7 +355,23 @@ def tgt_loss_labels(src_logits_, tgt_labels_, log=True):
     losses = {'tgt_loss_ce': loss_ce}
 
     return losses
+def tgt_loss_room_labels(src_room_logits, tgt_room_labels, log=True):
 
+    if len(tgt_room_labels) == 0:
+        return {
+            'tgt_loss_ce': torch.as_tensor(0.).to('cuda'),
+        }
+
+    src_room_logits, tgt_room_labels= src_room_logits.unsqueeze(0), tgt_room_labels.unsqueeze(0).float()
+
+    # print("tgt_loss_labels",src_logits.shape,tgt_labels.shape,src_logits.dtype,tgt_labels.dtype)
+    print("去噪过程",src_room_logits.shape,tgt_room_labels.shape)
+
+    loss_room_ce = F.cross_entropy(src_room_logits, tgt_room_labels)
+
+    losses = {'tgt_loss_room_ce': loss_room_ce}
+
+    return losses
 
 def compute_dn_loss(mask_dict, training, aux_num,angle):
     """
@@ -350,10 +385,13 @@ def compute_dn_loss(mask_dict, training, aux_num,angle):
     losses = {}
     #print("mask_dict",mask_dict)
     if training and 'output_known_lbs_polys' in mask_dict:
-        known_labels, known_polys, output_known_class, output_known_coord, known_lengths = prepare_for_loss(mask_dict)
+        known_labels, known_polys, output_known_class, output_known_coord, known_lengths,output_known_room_labels,known_room_labels = prepare_for_loss(mask_dict)
         # print("compute_dn_loss",output_known_class[-1].shape, known_labels.shape,known_polys.shape,output_known_coord[-1].shape)
         losses.update(tgt_loss_labels(output_known_class[-1].view(-1), known_labels))
         losses.update(tgt_loss_polys(output_known_coord[-1], known_polys, known_lengths,angle))
+        if output_known_room_labels is not None:
+            losses.update(tgt_loss_room_labels(output_known_room_labels.squeeze(0), known_room_labels))
+            
     else:
         losses['tgt_loss_coords'] = torch.as_tensor(0.).to('cuda')
         losses['tgt_loss_ce'] = torch.as_tensor(0.).to('cuda')

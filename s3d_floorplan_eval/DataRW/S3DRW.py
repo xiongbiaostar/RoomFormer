@@ -45,7 +45,6 @@ class S3DRW(DataRW):
         else:
             assert False
 
-        # print(len(list(iter(self.s3d_loader.data))))
         self.gt_sample = gt_sample = self.loader[scene_ind]
         self.gt_sample["density_map"] = torch.tensor(self.gt_sample["density_map"][None], device=self.device)
         self.gt_sample["room_map"] = torch.tensor(self.gt_sample["room_map"][None,:,:,None], device=self.device)

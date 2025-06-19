@@ -459,15 +459,14 @@ def delete_duplicate_edges_by_logits(edges, pred_logits, angle_thresh_deg=5.0, d
     return edges[keep_idx,:]
 def get_corners_from_edges(edges,pred_logits, threshold=10):
     """ 多边形边优化主函数 """
-    if len(edges) < 3:
+    if len(edges) <3:
         return edges
     
     # keep_mask = detect_duplicate_edges(edges, 5, 5)
     filtered_edges = delete_duplicate_edges_by_logits(edges,pred_logits)#[keep_mask]
-
     # 第一步：计算所有需要合并的边对
     mask, intersections, valid, valid_both, valid_first, valid_second, valid_out= compute_intersections_matrix(filtered_edges,threshold)
-
+    intersections=np.around(intersections).astype(np.int32)
     # 根据mask筛选参数：仅保留mask为True的项
     valid = valid[mask]
     intersections = intersections[mask]
@@ -499,12 +498,12 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
                 dist_corners = np.linalg.norm(current_end - next_start)
 
                 avg_dist_to_corners = (dist_to_end + dist_to_start) / 2
-                if valid_both[arr_idx]:
+                if valid_both[arr_idx]& (len(corners)==0 or tuple(np.around(corners[-1]).astype(np.int32)) != tuple(intersections[arr_idx])):
                     corners.append(intersections[arr_idx])
                 elif valid_first[arr_idx] or valid_second[arr_idx]:
                     if dist_corners <= avg_dist_to_corners:
 
-                        if not corners or tuple(corners[-1]) != tuple(current_end):
+                        if len(corners)==0 or tuple(corners[-1]) != tuple(current_end):
                             corners.append(current_end)
                         if tuple(next_start) != tuple(current_end):
                             corners.append(next_start)
@@ -518,25 +517,26 @@ def get_corners_from_edges(edges,pred_logits, threshold=10):
 
                         corners.append(intersections[arr_idx])
                     else:
-                        if not corners or tuple(corners[-1]) != tuple(current_end):
+                        if len(corners)==0 or tuple(corners[-1]) != tuple(current_end):
                             corners.append(current_end)
                         if tuple(next_start) != tuple(current_end):
                             corners.append(next_start)
                 else:
                     # 否则添加当前终点和下个起点
-                    if not corners or tuple(corners[-1]) != tuple(current_end):
+
+                    if len(corners)==0 or tuple(corners[-1]) != tuple(current_end):
                         corners.append(current_end)
                     if tuple(next_start) != tuple(current_end):
                         corners.append(next_start)
             else:
                 # 否则添加当前终点和下个起点
-                if not corners or tuple(corners[-1]) != tuple(current_end):
+                if len(corners)==0 or tuple(corners[-1]) != tuple(current_end):
                     corners.append(current_end)
                 if tuple(next_start) != tuple(current_end):
                     corners.append(next_start)
         else:
             # 否则添加当前终点和下个起点
-            if not corners or tuple(corners[-1]) != tuple(current_end) :
+            if len(corners)==0 or tuple(corners[-1]) != tuple(current_end) :
                 corners.append(current_end)
             if tuple(next_start) != tuple(current_end):
                 corners.append(next_start)
